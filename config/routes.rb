@@ -81,6 +81,7 @@ Rails.application.routes.draw do
       'courses/:course_id/teams/new',
       'courses/:course_id/teams/:team_id/details',
       'courses/:course_id/teams/:team_id/actions',
+      'courses/:course_id/calendar',
     ].each do |path|
       get path, action: 'school_router'
     end
