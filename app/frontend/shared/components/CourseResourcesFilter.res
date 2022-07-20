@@ -15,7 +15,7 @@ type filter = {
 }
 
 let makeFilter = (key, label, filterType: filterType, color) => {
-  {key: key, label: label, filterType: filterType, color: color}
+  {key, label, filterType, color}
 }
 
 type filterItem = {
@@ -41,9 +41,9 @@ let reducer = (state, action) =>
       ...state,
       filterInput: "",
     }
-  | UpdateFilterInput(filterInput) => {...state, filterInput: filterInput}
+  | UpdateFilterInput(filterInput) => {...state, filterInput}
   | SetLoading => {...state, filterLoading: true}
-  | SetFilterData(filterData) => {...state, filterData: filterData, filterLoading: false}
+  | SetFilterData(filterData) => {...state, filterData, filterLoading: false}
   }
 
 module CourseResourceInfoInfoQuery = %graphql(`
@@ -87,22 +87,34 @@ let getCourseResources = (send, courseId, filters: array<filter>) => {
   }
 }
 
+let formatStringWithID = string => {
+  string->Js.String2.replaceByRe(%re("/^\d+;/"), "")
+}
+
 module Selectable = {
   type t = {
     key: string,
-    value: string,
+    orginalValue: string,
+    displayValue: string,
     label: option<string>,
     color: string,
   }
 
-  let value = t => t.value
+  let value = t => t.displayValue
   let label = t => t.label
   let key = t => t.key
   let color = t => t.color
+  let orginalValue = t => t.orginalValue
 
-  let searchString = t => Belt.Option.getWithDefault(t.label, t.key) ++ " " ++ t.value
+  let searchString = t => Belt.Option.getWithDefault(t.label, t.key) ++ " " ++ t.displayValue
 
-  let make = (key, value, label, color) => {key: key, value: value, label: label, color: color}
+  let make = (key, value, label, color) => {
+    key,
+    orginalValue: value,
+    displayValue: value->formatStringWithID,
+    label,
+    color,
+  }
 }
 
 module Multiselect = MultiselectDropdown.Make(Selectable)
@@ -150,7 +162,11 @@ let selectedFromQueryParams = (params, filters) => {
 }
 
 let onSelect = (params, send, selectable) => {
-  Webapi.Url.URLSearchParams.set(Selectable.key(selectable), Selectable.value(selectable), params)
+  Webapi.Url.URLSearchParams.set(
+    Selectable.key(selectable),
+    Selectable.orginalValue(selectable),
+    params,
+  )
   RescriptReactRouter.push("?" ++ Webapi.Url.URLSearchParams.toString(params))
   send(UnsetSearchString)
 }
@@ -178,7 +194,7 @@ let make = (~courseId, ~filters: array<filter>, ~search) => {
     onDeselect={onDeselect(params)}
     value=state.filterInput
     onChange={filterInput => send(UpdateFilterInput(filterInput))}
-    placeholder={"Filter by foo foo foo"}
+    placeholder={"Filter Resources"}
     loading={state.filterLoading}
     defaultOptions={unselected(state, filters)}
     hint={"...or start typing to filter by student using their name or email address"}

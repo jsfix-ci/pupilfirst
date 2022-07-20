@@ -87,11 +87,11 @@ module Types
 
     resolved_field :teams, Types::TeamType.connection_type, null: false do
       argument :course_id, ID, required: true
-      argument :coach_notes, Types::CoachNoteFilterType, required: true
-      argument :tags, [String], required: true
-      argument :level_id, ID, required: false
-      argument :coach_id, ID, required: false
-      argument :search, String, required: false
+      argument :filter_string, String, required: false
+    end
+
+    resolved_field :team, Types::TeamType, null: false do
+      argument :id, ID, required: true
     end
 
     resolved_field :student_details, Types::StudentDetailsType, null: false do
@@ -117,16 +117,7 @@ module Types
                    Types::StudentType.connection_type,
                    null: false do
       argument :course_id, ID, required: true
-      argument :cohort_name, String, required: false
-      argument :level_name, String, required: false
-      argument :name, String, required: false
-      argument :email, String, required: false
-      argument :user_tags, [String], required: false
-      argument :personal_coach_name, String, required: false
-      argument :include_inactive, Boolean, required: false
-      argument :student_tags, [String], required: false
-      argument :sort_by, String, required: true
-      argument :sort_direction, Types::SortDirectionType, required: true
+      argument :filter_string, String, required: false
     end
 
     resolved_field :student, Types::StudentType, null: false do
@@ -165,9 +156,7 @@ module Types
                    [Types::DistributionInLevelType],
                    null: false do
       argument :course_id, ID, required: true
-      argument :coach_notes, Types::CoachNoteFilterType, required: true
-      argument :tags, [String], required: true
-      argument :coach_id, ID, required: false
+      argument :filter_string, String, required: false
     end
 
     resolved_field :topics, Types::TopicType.connection_type, null: false do

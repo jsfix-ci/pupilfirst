@@ -31,9 +31,9 @@ let unsafeLevelNumber = (levels, componentName, levelId) =>
   )
 
 let make = (~id, ~name, ~number) => {
-  id: id,
-  name: name,
-  number: number,
+  id,
+  name,
+  number,
 }
 
 let makeFromJs = level => {
@@ -42,7 +42,7 @@ let makeFromJs = level => {
 
 let shortName = t => "Level " ++ (t.number |> string_of_int)
 
-let filterValue = t => (t.number |> string_of_int) ++ ", " ++ t.name
+let filterValue = t => t.id ++ ";" ++ t.number->string_of_int ++ ", " ++ t.name
 
 module Fragment = %graphql(`
   fragment LevelFragment on Level {

@@ -21,12 +21,19 @@ type state = {
   filterInput: string,
   totalEntriesCount: int,
   reloadDistributionAt: option<Js.Date.t>,
+  studentDistribution: array<DistributionInLevel.t>,
 }
 
 type action =
   | UnsetSearchString
   | UpdateFilterInput(string)
-  | LoadStudents(option<string>, bool, array<StudentInfo.t>, int)
+  | LoadStudents(
+      option<string>,
+      bool,
+      array<StudentInfo.t>,
+      int,
+      option<array<DistributionInLevel.t>>,
+    )
   | BeginLoadingMore
   | BeginReloading
 
@@ -36,8 +43,8 @@ let reducer = (state, action) =>
       ...state,
       filterInput: "",
     }
-  | UpdateFilterInput(filterInput) => {...state, filterInput: filterInput}
-  | LoadStudents(endCursor, hasNextPage, students, totalEntriesCount) =>
+  | UpdateFilterInput(filterInput) => {...state, filterInput}
+  | LoadStudents(endCursor, hasNextPage, students, totalEntriesCount, studentDistribution) =>
     let updatedStudent = switch state.loading {
     | LoadingMore => Js.Array2.concat(PagedStudents.toArray(state.students), students)
     | Reloading(_) => students
@@ -47,7 +54,9 @@ let reducer = (state, action) =>
       ...state,
       students: PagedStudents.make(updatedStudent, hasNextPage, endCursor),
       loading: LoadingV2.setNotLoading(state.loading),
-      totalEntriesCount: totalEntriesCount,
+      totalEntriesCount,
+      reloadDistributionAt: None,
+      studentDistribution: Belt.Option.getWithDefault(studentDistribution, []),
     }
   | BeginLoadingMore => {...state, loading: LoadingMore}
   | BeginReloading => {
@@ -57,15 +66,14 @@ let reducer = (state, action) =>
     }
   }
 
-// Todo - Implement coach notes filter
 module UserDetailsFragment = UserDetails.Fragment
 module LevelFragment = Shared__Level.Fragment
 module CohortFragment = Cohort.Fragment
 module UserProxyFragment = UserProxy.Fragment
 
 module StudentsQuery = %graphql(`
-    query StudentsFromCoursesStudentsRootQuery($courseId: ID!, $cohortName: String, $levelName: String, $name: String, $email: String, $after: String, $studentTags: [String!], $userTags: [String!], $sortBy: String!, $sortDirection: SortDirection!) {
-      courseStudents(courseId: $courseId, cohortName: $cohortName, levelName: $levelName, name: $name, email: $email, first: 20, after: $after, studentTags: $studentTags, userTags: $userTags, sortBy: $sortBy, sortDirection: $sortDirection) {
+    query StudentsFromCoursesStudentsRootQuery($courseId: ID!, $after: String, $filterString: String, $skipIfLoadingMore: Boolean!) {
+      courseStudents(courseId: $courseId, filterString: $filterString, first: 20, after: $after, ) {
         nodes {
           id,
           taggings
@@ -89,35 +97,24 @@ module StudentsQuery = %graphql(`
         }
         totalCount
       }
+      studentDistribution(courseId: $courseId, filterString: $filterString) @skip(if: $skipIfLoadingMore) {
+        id
+        number
+        filterName
+        studentsInLevel
+        unlocked
+      }
     }
   `)
 
-let getStudents = (send, courseId, cursor, params) => {
-  let sortBy = "name"
-  let sortDirection = #Ascending
-
-  open Webapi.Url.URLSearchParams
-
-  let name = get("name", params)
-  let email = get("email", params)
-  let levelName = get("level", params)
-  let cohortName = get("cohort", params)
-  let userTags =
-    get("user_tags", params)->Belt.Option.mapWithDefault([], u => Js.String.split(",", u))
-  let studentTags =
-    get("student_tags", params)->Belt.Option.mapWithDefault([], u => Js.String.split(",", u))
+let getStudents = (send, courseId, cursor, ~loadingMore=false, params) => {
+  let filterString = Webapi.Url.URLSearchParams.toString(params)
 
   StudentsQuery.makeVariables(
     ~courseId,
     ~after=?cursor,
-    ~sortBy,
-    ~sortDirection,
-    ~userTags,
-    ~studentTags,
-    ~name?,
-    ~email?,
-    ~levelName?,
-    ~cohortName?,
+    ~filterString=?Some(filterString),
+    ~skipIfLoadingMore={loadingMore},
     (),
   )
   |> StudentsQuery.fetch
@@ -136,12 +133,27 @@ let getStudents = (send, courseId, cursor, params) => {
           ~personalCoaches=s.personalCoaches->Js.Array2.map(UserProxy.makeFromFragment),
         )
       )
+
+    let studentDistribution =
+      response.studentDistribution->Belt.Option.map(p =>
+        p->Js.Array2.map(
+          d =>
+            DistributionInLevel.make(
+              ~id=d.id,
+              ~number=d.number,
+              ~studentsInLevel=d.studentsInLevel,
+              ~unlocked=d.unlocked,
+              ~filterName=d.filterName,
+            ),
+        )
+      )
     send(
       LoadStudents(
         response.courseStudents.pageInfo.endCursor,
         response.courseStudents.pageInfo.hasNextPage,
         students,
         response.courseStudents.totalCount,
+        studentDistribution,
       ),
     )
     Js.Promise.resolve()
@@ -150,56 +162,6 @@ let getStudents = (send, courseId, cursor, params) => {
 }
 
 let applicableLevels = levels => levels |> Js.Array.filter(level => Level.number(level) != 0)
-
-// module Selectable = {
-//   type t =
-//     | Level(Level.t)
-//     | AssignedToCoach(Coach.t, string)
-//     | NameOrEmail(string)
-//     | CoachNotes(bool)
-//     | Tag(string)
-
-//   let label = t =>
-//     switch t {
-//     | Level(level) => Some(LevelLabel.format(level |> Level.number |> string_of_int))
-//     | AssignedToCoach(_) => Some(tr("assigned_to"))
-//     | NameOrEmail(_) => Some(tr("name_email"))
-//     | CoachNotes(_) => Some(tr("coach_notes"))
-//     | Tag(_) => Some(tr("tagged_with"))
-//     }
-
-//   let value = t =>
-//     switch t {
-//     | Level(level) => level |> Level.name
-//     | AssignedToCoach(coach, currentCoachId) =>
-//       coach |> Coach.id == currentCoachId ? tr("me") : coach |> Coach.name
-//     | NameOrEmail(search) => search
-//     | CoachNotes(on) => on ? tr("has_notes") : tr("no_notes")
-//     | Tag(tag) => tag
-//     }
-
-//   let searchString = t =>
-//     switch t {
-//     | Level(level) =>
-//       LevelLabel.searchString(level |> Level.number |> string_of_int, level |> Level.name)
-//     | AssignedToCoach(coach, currentCoachId) =>
-//       if coach |> Coach.id == currentCoachId {
-//         (coach |> Coach.name) ++ tr("search_assigned_me")
-//       } else {
-//         tr("search_assigned_to") ++ (coach |> Coach.name)
-//       }
-//     | NameOrEmail(search) => search
-//     | CoachNotes(_) => tr("search_no_notes")
-//     | Tag(tag) => tr("search_tag") ++ tag
-//     }
-
-//   let color = _t => "gray"
-//   let level = level => Level(level)
-//   let assignedToCoach = (coach, currentCoachId) => AssignedToCoach(coach, currentCoachId)
-//   let nameOrEmail = search => NameOrEmail(search)
-//   let coachNotes = on => CoachNotes(on)
-//   let tag = tagString => Tag(tagString)
-// }
 
 let makeFilters = () => {
   [
@@ -218,55 +180,18 @@ let makeFilters = () => {
   ]
 }
 
-let filterPlaceholder = state => tr("filter_level")
-
-// Todo - make this a real filter
-
-// let restoreFilterNotice = (send, currentCoach, message) =>
-//   <div
-//     className="mt-2 text-sm italic flex flex-col md:flex-row items-center justify-between p-3 border border-gray-300 bg-white rounded-lg">
-//     <span> {message |> str} </span>
-//     <button
-//       className="px-2 py-1 rounded text-xs overflow-hidden border border-gray-300 bg-gray-50 text-gray-800 hover:bg-gray-300 mt-1 md:mt-0"
-//       onClick={_ => send(SelectCoach(currentCoach))}>
-//       {tr("assigned_me") |> str} <i className="fas fa-level-up-alt ml-2" />
-//     </button>
-//   </div>
-
-// let restoreAssignedToMeFilter = (state, send, currentTeamCoach) =>
-//   currentTeamCoach |> OptionUtils.mapWithDefault(currentCoach =>
-//     switch state.filter.coach {
-//     | None => restoreFilterNotice(send, currentCoach, tr("restore_filer_none"))
-//     | Some(selectedCoach) if selectedCoach |> Coach.id == Coach.id(currentCoach) => React.null
-//     | Some(selectedCoach) =>
-//       restoreFilterNotice(
-//         send,
-//         currentCoach,
-//         tr("showing_assigned") ++ ((selectedCoach |> Coach.name) ++ "."),
-//       )
-//     }
-//   , React.null)
-
-let computeInitialState = currentTeamCoach => {
+let computeInitialState = () => {
   loading: LoadingV2.empty(),
   students: Unloaded,
   filterInput: "",
   totalEntriesCount: 0,
   reloadDistributionAt: None,
+  studentDistribution: [],
 }
 
 let reloadStudents = (courseId, params, send) => {
   send(BeginReloading)
   getStudents(send, courseId, None, params)
-}
-
-let onAddCoachNote = (courseId, params, send, ()) => {
-  // switch state.filter.coachNotes {
-  // | #WithCoachNotes
-  // | #IgnoreCoachNotes => ()
-  // | #WithoutCoachNotes => reloadStudents(courseId, state, send)
-  // }
-  reloadStudents(courseId, params, send)
 }
 
 let onSelect = (key, value, params) => {
@@ -281,18 +206,16 @@ let selectLevel = (levels, params, levelId) => {
   onSelect("level", level->Level.name, params)
 }
 
+let showStudents = (state, students) => {
+  <div>
+    <CoursesStudents__StudentsList students />
+    {PagedStudents.showStats(state.totalEntriesCount, Array.length(students), "Students")}
+  </div>
+}
+
 @react.component
-let make = (~levels, ~course, ~userId, ~personalCoaches, ~currentCoach, ~teamTags, ~userTags) => {
-  let (currentTeamCoach, _) = React.useState(() =>
-    personalCoaches->Belt.Array.some(coach => coach |> Coach.id == (currentCoach |> Coach.id))
-      ? Some(currentCoach)
-      : None
-  )
-
-  let (state, send) = React.useReducerWithMapState(reducer, currentTeamCoach, computeInitialState)
-  let allTags = Belt.Set.String.union(teamTags, userTags)
-
-  let courseId = course |> Course.id
+let make = (~courseId) => {
+  let (state, send) = React.useReducer(reducer, computeInitialState())
 
   let url = RescriptReactRouter.useUrl()
   let params = Webapi.Url.URLSearchParams.make(url.search)
@@ -300,86 +223,52 @@ let make = (~levels, ~course, ~userId, ~personalCoaches, ~currentCoach, ~teamTag
   React.useEffect1(() => {
     reloadStudents(courseId, params, send)
     None
-  }, [url.search])
+  }, [courseId, url.search])
 
-  <div role="main" ariaLabel="Students">
-    {switch url.path {
-    | list{"students", studentId, "report"} =>
-      <CoursesStudents__StudentOverlay
-        courseId
-        studentId
-        levels
-        userId
-        personalCoaches
-        onAddCoachNotesCB={onAddCoachNote(courseId, params, send)}
-      />
-    | _ => React.null
-    }}
-    <div className="bg-gray-50 pt-8 pb-8 px-3 -mt-7">
-      // <CoursesStudents__StudentDistribution
-      //   selectLevelCB={selectLevel(levels, params)}
-      //   courseId
-      //   filterCoach=state.filter.coach
-      //   filterCoachNotes=state.filter.coachNotes
-      //   filterTags=state.filter.tags
-      //   reloadAt=state.reloadDistributionAt
-      // />
-      <div className="w-full py-4 bg-gray-50 relative md:sticky md:top-0 z-10">
-        <div className="max-w-3xl mx-auto bg-gray-50 sticky md:static md:top-0">
-          // <Multiselect
-          //   id="filter"
-          //   unselected={unselected(
-          //     levels,
-          //     personalCoaches,
-          //     allTags,
-          //     currentCoach |> Coach.id,
-          //     state,
-          //   )}
-          //   selected={selected(state, currentCoach |> Coach.id)}
-          //   onSelect={onSelectFilter(send)}
-          //   onDeselect={onDeselectFilter(send)}
-          //   value=state.filterString
-          //   onChange={filterString => send(UpdateFilterString(filterString))}
-          //   placeholder={filterPlaceholder(state)}
-          // />
+  <div role="main" ariaLabel="Students" className="flex-1 flex flex-col overflow-y-auto">
+    <div className="w-full md:w-4/5 px-4 mt-8 md:mt-25 mx-auto">
+      <div className="bg-gray-50 w-full">
+        <h1 className="text-2xl font-semibold"> {"Students"->str} </h1>
+        <div className="p-5 bg-gray-100 rounded-lg mt-6">
+          <p className="text-gray-600 text-sm font-medium">
+            {"Level Wise distribution of students"->str}
+          </p>
+          <CoursesStudents__StudentDistribution
+            params={params} studentDistribution={state.studentDistribution}
+          />
+        </div>
+        <div
+          className="p-5 mt-6 bg-white rounded-md border border-gray-300 relative md:sticky md:top-16 z-10">
+          <p className="uppercase pb-2 text-xs font-semibold"> {"Filter students by"->str} </p>
           <CourseResourcesFilter courseId filters={makeFilters()} search={url.search} />
-          // {restoreAssignedToMeFilter(state, send, currentTeamCoach)}
+        </div>
+        <div className="my-6">
+          {switch state.students {
+          | Unloaded => SkeletonLoading.multiple(~count=10, ~element=SkeletonLoading.userCard())
+          | PartiallyLoaded(students, cursor) =>
+            <div>
+              {showStudents(state, students)}
+              {switch state.loading {
+              | LoadingMore => SkeletonLoading.multiple(~count=3, ~element=SkeletonLoading.card())
+              | Reloading(times) =>
+                ReactUtils.nullUnless(
+                  <button
+                    className="btn btn-primary-ghost cursor-pointer w-full mt-4"
+                    onClick={_ => {
+                      send(BeginLoadingMore)
+                      getStudents(send, courseId, Some(cursor), params, ~loadingMore=true)
+                    }}>
+                    {ts("load_more")->str}
+                  </button>,
+                  ArrayUtils.isEmpty(times),
+                )
+              }}
+            </div>
+          | FullyLoaded(students) => showStudents(state, students)
+          }}
         </div>
       </div>
-      <div className=" max-w-3xl mx-auto">
-        {switch state.students {
-        | Unloaded => SkeletonLoading.multiple(~count=10, ~element=SkeletonLoading.userCard())
-        | PartiallyLoaded(students, cursor) =>
-          <div>
-            <CoursesStudents__StudentsList students />
-            {switch state.loading {
-            | LoadingMore => SkeletonLoading.multiple(~count=3, ~element=SkeletonLoading.card())
-            | Reloading(times) =>
-              ReactUtils.nullUnless(
-                <button
-                  className="btn btn-primary-ghost cursor-pointer w-full mt-4"
-                  onClick={_ => {
-                    send(BeginLoadingMore)
-                    getStudents(send, courseId, Some(cursor), params)
-                  }}>
-                  {ts("load_more") |> str}
-                </button>,
-                ArrayUtils.isEmpty(times),
-              )
-            }}
-          </div>
-        | FullyLoaded(students) => <CoursesStudents__StudentsList students />
-        }}
-      </div>
+      {PagedStudents.showLoading(state.students, state.loading)}
     </div>
-    {switch state.students {
-    | Unloaded => React.null
-    | _ =>
-      let loading = switch state.loading {
-      | Reloading(times) => ArrayUtils.isNotEmpty(times)
-      | LoadingMore => false
-      }
-      <LoadingSpinner loading />
-    }}
   </div>
 }

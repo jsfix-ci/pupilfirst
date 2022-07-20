@@ -56,6 +56,12 @@ module StudentDetailsQuery = %graphql(`
           }
           accessEndsAt
           droppedOutAt
+          course {
+            id
+            levels {
+              ...LevelFragment
+            }
+          }
         }
         totalTargets
         targetsCompleted
@@ -100,7 +106,7 @@ module StudentDetailsQuery = %graphql(`
     }
   `)
 
-let getStudentDetails = (studentId, setState, ()) => {
+let getStudentDetails = (studentId, setState) => {
   setState(state => {...state, studentData: Loading})
   StudentDetailsQuery.fetch({studentId: studentId})
   |> Js.Promise.then_((response: StudentDetailsQuery.t) => {
@@ -143,6 +149,8 @@ let getStudentDetails = (studentId, setState, ()) => {
       ~quizScores=response.studentDetails.quizScores,
       ~averageGrades,
       ~completedLevelIds=response.studentDetails.completedLevelIds,
+      ~courseId=response.studentDetails.student.course.id,
+      ~levels=response.studentDetails.student.course.levels->Js.Array2.map(Level.makeFromFragment),
       ~student=StudentInfo.make(
         ~id=s.id,
         ~taggings=s.taggings,
@@ -157,17 +165,18 @@ let getStudentDetails = (studentId, setState, ()) => {
         StudentDetails.makeTeam(
           ~id=team.id,
           ~name=team.name,
-          ~students=team.students->Js.Array2.map(s =>
-            StudentInfo.make(
-              ~id=s.id,
-              ~taggings=s.taggings,
-              ~user=UserDetails.makeFromFragment(s.user),
-              ~level=Shared__Level.makeFromFragment(s.level),
-              ~cohort=Cohort.makeFromFragment(s.cohort),
-              ~accessEndsAt=s.accessEndsAt->Belt.Option.map(DateFns.decodeISO),
-              ~droppedOutAt=s.droppedOutAt->Belt.Option.map(DateFns.decodeISO),
-              ~personalCoaches=s.personalCoaches->Js.Array2.map(UserProxy.makeFromFragment),
-            )
+          ~students=team.students->Js.Array2.map(
+            s =>
+              StudentInfo.make(
+                ~id=s.id,
+                ~taggings=s.taggings,
+                ~user=UserDetails.makeFromFragment(s.user),
+                ~level=Shared__Level.makeFromFragment(s.level),
+                ~cohort=Cohort.makeFromFragment(s.cohort),
+                ~accessEndsAt=s.accessEndsAt->Belt.Option.map(DateFns.decodeISO),
+                ~droppedOutAt=s.droppedOutAt->Belt.Option.map(DateFns.decodeISO),
+                ~personalCoaches=s.personalCoaches->Js.Array2.map(UserProxy.makeFromFragment),
+              ),
           ),
         )
       ),
@@ -177,12 +186,9 @@ let getStudentDetails = (studentId, setState, ()) => {
     Js.Promise.resolve()
   })
   |> ignore
-
-  None
 }
 
-let updateSubmissions = (setState, submissions) =>
-  setState(state => {...state, submissions: submissions})
+let updateSubmissions = (setState, submissions) => setState(state => {...state, submissions})
 
 let doughnutChart = (color, percentage) =>
   <svg viewBox="0 0 36 36" className={"student-overlay__doughnut-chart " ++ color}>
@@ -319,8 +325,7 @@ let showSocialLinks = socialLinks =>
     |> React.array}
   </div>
 
-let setSelectedTab = (selectedTab, setState) =>
-  setState(state => {...state, selectedTab: selectedTab})
+let setSelectedTab = (selectedTab, setState) => setState(state => {...state, selectedTab})
 
 let studentLevelClasses = (levelNumber, levelCompleted, currentLevelNumber) => {
   let reached = levelNumber <= currentLevelNumber ? "student-overlay__student-level--reached" : ""
@@ -351,7 +356,8 @@ let levelProgressBar = (levelId, levels, levelsCompleted) => {
       <h6 className="text-sm font-semibold"> {t("level_progress") |> str} </h6>
       {courseCompleted
         ? <p className="text-green-600 font-semibold">
-            {`🎉` |> str} <span className="text-xs ml-px"> {t("course_completed") |> str} </span>
+            {`🎉` |> str}
+            <span className="text-xs ml-px"> {t("course_completed") |> str} </span>
           </p>
         : React.null}
     </div>
@@ -433,6 +439,7 @@ let otherTeamMembers = (setState, studentId, studentDetails) =>
       <h6 className="font-semibold"> {t("other_team_members") |> str} </h6>
       {team
       ->StudentDetails.students
+      ->Js.Array2.filter(student => StudentInfo.id(student) != studentId)
       ->Js.Array2.map(student => {
         let path = "/students/" ++ (student->StudentInfo.id ++ "/report")
 
@@ -474,18 +481,20 @@ let inactiveWarning = student => {
   | (None, None) => None
   }
 
-  warning |> OptionUtils.mapWithDefault(
-    warning =>
-      <div className="border border-yellow-400 rounded bg-yellow-400 py-2 px-3 mt-3">
-        <i className="fas fa-exclamation-triangle" />
-        <span className="ml-2"> {warning |> str} </span>
-      </div>,
-    React.null,
-  )
+  warning |> OptionUtils.mapWithDefault(warning =>
+    <div className="border border-yellow-400 rounded bg-yellow-400 py-2 px-3 mt-3">
+      <i className="fas fa-exclamation-triangle" />
+      <span className="ml-2"> {warning |> str} </span>
+    </div>
+  , React.null)
+}
+
+let onAddCoachNotesCB = (studentId, setState, _) => {
+  getStudentDetails(studentId, setState)
 }
 
 @react.component
-let make = (~courseId, ~studentId, ~levels, ~userId, ~personalCoaches, ~onAddCoachNotesCB) => {
+let make = (~studentId, ~userId) => {
   let (state, setState) = React.useState(() => initialState)
 
   React.useEffect0(() => {
@@ -493,7 +502,10 @@ let make = (~courseId, ~studentId, ~levels, ~userId, ~personalCoaches, ~onAddCoa
     Some(() => ScrollLock.deactivate())
   })
 
-  React.useEffect1(getStudentDetails(studentId, setState), [studentId])
+  React.useEffect1(() => {
+    getStudentDetails(studentId, setState)
+    None
+  }, [studentId])
 
   <div
     className="fixed z-30 top-0 left-0 w-full h-full overflow-y-scroll md:overflow-hidden bg-white">
@@ -507,7 +519,7 @@ let make = (~courseId, ~studentId, ~levels, ~userId, ~personalCoaches, ~onAddCoa
               <button
                 ariaLabel={t("close_student_report")}
                 title={t("close_student_report")}
-                onClick={_ => closeOverlay(courseId)}
+                onClick={_ => closeOverlay(StudentDetails.courseId(studentDetails))}
                 className="absolute z-50 left-0 cursor-pointer top-0 inline-flex p-1 rounded-full bg-gray-50 h-10 w-10 justify-center items-center text-gray-600 hover:text-gray-900 hover:bg-gray-300 focus:outline-none focus:text-gray-900 focus:bg-gray-300 focus:ring-2 focus:ring-inset focus:ring-focusColor-500">
                 <Icon className="if i-times-regular text-xl lg:text-2xl" />
               </button>
@@ -531,7 +543,7 @@ let make = (~courseId, ~studentId, ~levels, ~userId, ~personalCoaches, ~onAddCoa
             </div>
             {levelProgressBar(
               student->StudentInfo.level->Shared__Level.id,
-              levels,
+              StudentDetails.levels(studentDetails),
               studentDetails->StudentDetails.completedLevelIds,
             )}
             <div className="mb-8">
@@ -601,14 +613,18 @@ let make = (~courseId, ~studentId, ~levels, ~userId, ~personalCoaches, ~onAddCoa
                   studentId
                   hasArchivedNotes={studentDetails |> StudentDetails.hasArchivedNotes}
                   coachNotes={studentDetails |> StudentDetails.coachNotes}
-                  addNoteCB={addNote(setState, studentDetails, onAddCoachNotesCB)}
+                  addNoteCB={addNote(
+                    setState,
+                    studentDetails,
+                    onAddCoachNotesCB(studentId, setState),
+                  )}
                   userId
                   removeNoteCB={removeNote(setState, studentDetails)}
                 />
               | Submissions =>
                 <CoursesStudents__SubmissionsList
                   studentId
-                  levels
+                  levels={studentDetails->StudentDetails.levels}
                   submissions=state.submissions
                   updateSubmissionsCB={updateSubmissions(setState)}
                 />
@@ -617,6 +633,7 @@ let make = (~courseId, ~studentId, ~levels, ~userId, ~personalCoaches, ~onAddCoa
           </div>
         </div>
       }
+
     | Loading =>
       <div className="flex flex-col md:flex-row md:h-screen">
         <div className="w-full md:w-2/5 bg-white p-4 md:p-8 2xl:p-16">
@@ -624,7 +641,8 @@ let make = (~courseId, ~studentId, ~levels, ~userId, ~personalCoaches, ~onAddCoa
           {SkeletonLoading.multiple(~count=2, ~element=SkeletonLoading.userDetails())}
         </div>
         <div className="w-full relative md:w-3/5 bg-gray-50 md:border-l p-4 md:p-8 2xl:p-16">
-          {SkeletonLoading.contents()} {SkeletonLoading.userDetails()}
+          {SkeletonLoading.contents()}
+          {SkeletonLoading.userDetails()}
         </div>
       </div>
     }}
