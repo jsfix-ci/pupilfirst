@@ -130,6 +130,7 @@ let secondaryNavLinks = (selectedPage, courseId, currentUser) => {
     CourseCoaches,
     EvaluationCriteria,
     CourseExports,
+    Calendars
   ]
 
   let navOptionsAuthor = [Page.Curriculum, EvaluationCriteria]

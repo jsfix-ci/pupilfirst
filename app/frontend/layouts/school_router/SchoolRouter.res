@@ -8,6 +8,9 @@ let classNames = (default, trueClasses, falseClasses, bool) => {
   default ++ " " ++ (bool ? trueClasses : falseClasses)
 }
 
+
+
+
 @react.component
 let make = (~school, ~courses, ~currentUser) => {
   let url = RescriptReactRouter.useUrl()
@@ -65,6 +68,8 @@ let make = (~school, ~courses, ~currentUser) => {
       | list{"applicants", _applicantId, "details" | "actions"} => (Applicants, None)
       | list{"authors"} => (Authors, None)
       | list{"authors", _authorId} => (Authors, None)
+      | list{"calendars"} => (Calendars, Some(<CalendarsIndex__Root courseId />))
+      | list{"calendars", "new"} => (Calendars, Some(<CalendarsCreator__Root courseId  />))
       | list{"certificates"} => (Certificates, None)
       | list{"evaluation_criteria"} => (EvaluationCriteria, None)
       | _ =>

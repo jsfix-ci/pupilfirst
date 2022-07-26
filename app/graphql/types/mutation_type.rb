@@ -182,6 +182,7 @@ module Types
           mutation: Mutations::ConcludeSubmissionReport,
           null: false
     field :create_cohort, mutation: Mutations::CreateCohort, null: false
+    field :create_calendar, mutation: Mutations::CreateCalendar, null: false
     field :update_cohort, mutation: Mutations::UpdateCohort, null: false
     field :merge_cohort, mutation: Mutations::MergeCohort, null: false
     field :create_team, mutation: Mutations::CreateTeam, null: false
@@ -189,3 +190,8 @@ module Types
     field :destroy_team, mutation: Mutations::DestroyTeam, null: false
   end
 end
+
+## Operations should update the course show page.
+## wd.pupilfirst.org - check if content update needed.
+## apply.pupilfirst.school/wd is the path. Based on domain and valid applicants param render the form.
+## Add a graphql API ..for applicant fetching - LMS
