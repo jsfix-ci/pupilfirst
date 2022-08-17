@@ -4,7 +4,6 @@ module Types
     field :taggings, [String], null: false
     field :issued_certificates, [Types::IssuedCertificateType], null: false
     field :level, Types::LevelType, null: false
-    field :access_ends_at, GraphQL::Types::ISO8601DateTime, null: true
     field :dropped_out_at, GraphQL::Types::ISO8601DateTime, null: true
     field :user, Types::UserType, null: false
     field :personal_coaches, [Types::UserProxyType], null: false
@@ -31,7 +30,7 @@ module Types
     def cohort
       BatchLoader::GraphQL
         .for(object.cohort_id)
-        .batch(default_value: []) do |cohort_ids, loader|
+        .batch do |cohort_ids, loader|
           Cohort
             .where(id: cohort_ids)
             .each { |cohort| loader.call(cohort.id, cohort) }
@@ -41,7 +40,7 @@ module Types
     def course
       BatchLoader::GraphQL
         .for(object.cohort_id)
-        .batch(default_value: []) do |cohort_ids, loader|
+        .batch do |cohort_ids, loader|
           Cohort
             .joins(:course)
             .where(id: cohort_ids)
@@ -52,7 +51,7 @@ module Types
     def level
       BatchLoader::GraphQL
         .for(object.level_id)
-        .batch(default_value: []) do |level_ids, loader|
+        .batch do |level_ids, loader|
           Level
             .where(id: level_ids)
             .each { |level| loader.call(level.id, level) }
@@ -62,7 +61,7 @@ module Types
     def user
       BatchLoader::GraphQL
         .for(object.user_id)
-        .batch(default_value: []) do |user_ids, loader|
+        .batch do |user_ids, loader|
           User.where(id: user_ids).each { |user| loader.call(user.id, user) }
         end
     end

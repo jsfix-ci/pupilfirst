@@ -5,18 +5,12 @@ let ts = I18n.ts
 
 module Coach = UserProxy
 
-type rec teamCoachlist = (coachId, coachName, selected)
-and coachId = string
-and coachName = string
-and selected = bool
-
 type student = {
   name: string,
   taggings: array<string>,
   usetTaggings: array<string>,
   title: string,
   affiliation: string,
-  accessEndsAt: option<Js.Date.t>,
   coachIds: array<string>,
   cohort: Cohort.t,
 }
@@ -37,7 +31,6 @@ module Editor = {
     | UpdateTitle(string)
     | UpdateAffiliation(string)
     | UpdateSaving(bool)
-    | UpdateAccessEndsAt(option<Js.Date.t>)
     | UpdateCohort(Cohort.t)
 
   let stringInputInvalid = s => String.length(s) < 2
@@ -51,27 +44,14 @@ module Editor = {
 
   let handleErrorCB = (send, ()) => send(UpdateSaving(false))
 
-  let successMessage = (accessEndsAt, isSingleFounder) =>
-    switch accessEndsAt {
-    | Some(date) =>
-      switch (date->DateFns.isPast, isSingleFounder) {
-      | (true, true) => t("student_updated_moved")
-      | (true, false) => t("team_updated_moved")
-      | (false, true)
-      | (false, false) =>
-        t("student_updated")
-      }
-    | None => t("student_updated")
-    }
-
   let enrolledCoachIds = coaches =>
     coaches
     ->Js.Array2.filter(((_, _, selected)) => selected == true)
     ->Js.Array2.map(((key, _, _)) => key)
 
   module UpdateStudentDetailsQuery = %graphql(`
-    mutation UpdateStudentDetailsQuery($id: ID!, $cohortId: ID!, $coachIds: [ID!]!, $name: String!, $title: String!, $affiliation: String, $taggings: [String!]!, $accessEndsAt: ISO8601DateTime, ) {
-      updateStudentDetails(id: $id, cohortId: $cohortId, coachIds: $coachIds, name: $name, title: $title, affiliation: $affiliation, taggings: $taggings, accessEndsAt: $accessEndsAt) {
+    mutation UpdateStudentDetailsQuery($id: ID!, $cohortId: ID!, $coachIds: [ID!]!, $name: String!, $title: String!, $affiliation: String, $taggings: [String!]!) {
+      updateStudentDetails(id: $id, cohortId: $cohortId, coachIds: $coachIds, name: $name, title: $title, affiliation: $affiliation, taggings: $taggings) {
         success
       }
     }
@@ -81,7 +61,6 @@ module Editor = {
     send(UpdateSaving(true))
     let variables = UpdateStudentDetailsQuery.makeVariables(
       ~id=studentId,
-      ~accessEndsAt=?state.student.accessEndsAt->Belt.Option.map(DateFns.encodeISO),
       ~cohortId=Cohort.id(state.student.cohort),
       ~name=state.student.name,
       ~title=state.student.title,
@@ -218,13 +197,6 @@ module Editor = {
         },
       }
     | UpdateSaving(bool) => {...state, saving: bool}
-    | UpdateAccessEndsAt(accessEndsAt) => {
-        ...state,
-        student: {
-          ...state.student,
-          accessEndsAt: accessEndsAt,
-        },
-      }
     | UpdateCohort(cohort) => {
         ...state,
         student: {
@@ -258,7 +230,7 @@ module Editor = {
             autoFocus=true
             value=state.student.name
             onChange={event => updateName(send, ReactEvent.Form.target(event)["value"])}
-            className="appearance-none block w-full bg-white border border-gray-400 rounded py-3 px-4 leading-snug focus:outline-none focus:bg-white focus:border-transparent focus:ring-2 focus:ring-indigo-500"
+            className="appearance-none block w-full bg-white border border-gray-400 rounded py-3 px-4 leading-snug focus:outline-none focus:bg-white focus:border-transparent focus:ring-2 focus:ring-focusColor-500"
             id="name"
             type_="text"
             placeholder={t("student_name_placeholder")}
@@ -277,7 +249,7 @@ module Editor = {
           <input
             value=state.student.title
             onChange={event => updateTitle(send, ReactEvent.Form.target(event)["value"])}
-            className="appearance-none block w-full bg-white border border-gray-400 rounded py-3 px-4 leading-snug focus:outline-none focus:bg-white focus:border-transparent focus:ring-2 focus:ring-indigo-500"
+            className="appearance-none block w-full bg-white border border-gray-400 rounded py-3 px-4 leading-snug focus:outline-none focus:bg-white focus:border-transparent focus:ring-2 focus:ring-focusColor-500"
             id="title"
             type_="text"
             placeholder={t("title_placeholder")}
@@ -296,7 +268,7 @@ module Editor = {
           <input
             value=state.student.affiliation
             onChange={event => send(UpdateAffiliation(ReactEvent.Form.target(event)["value"]))}
-            className="appearance-none block w-full bg-white border border-gray-400 rounded py-3 px-4 leading-snug focus:outline-none focus:bg-white focus:border-transparent focus:ring-2 focus:ring-indigo-500"
+            className="appearance-none block w-full bg-white border border-gray-400 rounded py-3 px-4 leading-snug focus:outline-none focus:bg-white focus:border-transparent focus:ring-2 focus:ring-focusColor-500"
             id="affiliation"
             type_="text"
             placeholder={t("affiliation_placeholder")}
@@ -330,7 +302,7 @@ module Editor = {
                 {state.student.usetTaggings
                 ->Js.Array2.map(tag =>
                   <div
-                    className="bg-blue-100 border border-blue-500 rounded-lg px-2 py-px mt-1 mr-1 text-xs text-gray-900"
+                    className="bg-blue-100 text-blue-700 border border-blue-500 rounded-full px-3 py-2 mt-1 mr-1 text-xs text-gray-900"
                     key={tag}>
                     {str(tag)}
                   </div>
@@ -351,20 +323,6 @@ module Editor = {
             allowNewTags=true
           />
         </div>
-        <div className="mt-5">
-          <label className="tracking-wide text-xs font-semibold" htmlFor="access-ends-at-input">
-            {t("access_ends_at.label_student")->str}
-          </label>
-          <span className="ml-1 text-xs"> {ts("optional_braces")->str} </span>
-          <HelpIcon className="ml-2" link={t("access_ends_at.help_url")}>
-            {t("access_ends_at.help")->str}
-          </HelpIcon>
-          <DatePicker
-            onChange={date => send(UpdateAccessEndsAt(date))}
-            selected=?state.student.accessEndsAt
-            id="access-ends-at-input"
-          />
-        </div>
       </div>
       <div className="my-5 w-auto">
         <button
@@ -383,6 +341,7 @@ type baseData = {
   cohorts: array<Cohort.t>,
   tags: array<String.t>,
   courseCoaches: array<Coach.t>,
+  courseId: string,
 }
 
 type state = Unloaded | Loading | Loaded(baseData)
@@ -394,7 +353,6 @@ module StudentDetailsDataQuery = %graphql(`
   query StudentDetailsDataQuery($studentId: ID!) {
     student(studentId: $studentId) {
       taggings
-      accessEndsAt
       cohort {
         ...CohortFragment
       }
@@ -409,6 +367,7 @@ module StudentDetailsDataQuery = %graphql(`
         id
       }
       course {
+        id
         cohorts {
           ...CohortFragment
         }
@@ -422,7 +381,7 @@ module StudentDetailsDataQuery = %graphql(`
   }
   `)
 
-let loadData = (studentId, setState) => {
+let loadData = (studentId, setState, setCourseId) => {
   setState(_ => Loading)
   StudentDetailsDataQuery.fetch({studentId: studentId})
   |> Js.Promise.then_((response: StudentDetailsDataQuery.t) => {
@@ -432,40 +391,30 @@ let loadData = (studentId, setState) => {
         taggings: response.student.taggings,
         title: response.student.user.title,
         affiliation: Belt.Option.getWithDefault(response.student.user.affiliation, ""),
-        accessEndsAt: response.student.accessEndsAt->Belt.Option.map(DateFns.decodeISO),
         coachIds: response.student.personalCoaches->Js.Array2.map(c => c.id),
         cohort: response.student.cohort->Cohort.makeFromFragment,
         usetTaggings: response.student.user.taggings,
       },
+      courseId: response.student.course.id,
       cohorts: response.student.course.cohorts->Js.Array2.map(Cohort.makeFromFragment),
       tags: response.student.course.studentTags,
       courseCoaches: response.student.course.coaches->Js.Array2.map(Coach.makeFromFragment),
     }))
+    setCourseId(response.student.course.id)
     Js.Promise.resolve()
   })
   |> ignore
 }
 
-let studentDetailsSkeleton = () => {
-  <div className="max-w-5xl mx-auto px-2 mt-8">
-    {SkeletonLoading.input()}
-    {SkeletonLoading.input()}
-    {SkeletonLoading.input()}
-    {SkeletonLoading.input()}
-    {SkeletonLoading.input()}
-    {SkeletonLoading.button()}
-  </div>
-}
-
-let pageLinks = (courseId, studentId) => [
+let pageLinks = studentId => [
   School__PageHeader.makeLink(
-    ~href={`/school/courses/${courseId}/students/${studentId}/details`},
+    ~href={`/school/students/${studentId}/details`},
     ~title="Details",
     ~icon="fas fa-edit",
     ~selected=true,
   ),
   School__PageHeader.makeLink(
-    ~href=`/school/courses/${courseId}/students/${studentId}/actions`,
+    ~href=`/school/students/${studentId}/actions`,
     ~title="Actions",
     ~icon="fas fa-cog",
     ~selected=false,
@@ -473,34 +422,38 @@ let pageLinks = (courseId, studentId) => [
 ]
 
 @react.component
-let make = (~courseId, ~studentId) => {
+let make = (~studentId) => {
   let (state, setState) = React.useState(() => Unloaded)
+  let courseContext = React.useContext(SchoolRouter__CourseContext.context)
 
   React.useEffect1(() => {
-    loadData(studentId, setState)
+    loadData(studentId, setState, courseContext.setCourseId)
     None
   }, [studentId])
 
   <div>
-    <School__PageHeader
-      exitUrl={`/school/courses/${courseId}/students`}
-      title="Edit Student"
-      description={"Update student details"}
-      links={pageLinks(courseId, studentId)}
-    />
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-5xl mx-auto px-2">
       {switch state {
-      | Unloaded => str("Should Load data")
-      | Loading => studentDetailsSkeleton()
+      | Unloaded
+      | Loading =>
+        SkeletonLoading.coursePage()
       | Loaded(baseData) =>
-        <Editor
-          courseCoaches=baseData.courseCoaches
-          avilableTags={baseData.tags}
-          student={baseData.student}
-          cohorts={baseData.cohorts}
-          studentId={studentId}
-          courseId={courseId}
-        />
+        <div>
+          <School__PageHeader
+            exitUrl={`/school/courses/${baseData.courseId}/students`}
+            title={`Edit ${baseData.student.name}`}
+            description={"Update student details"}
+            links={pageLinks(studentId)}
+          />
+          <Editor
+            courseCoaches=baseData.courseCoaches
+            avilableTags={baseData.tags}
+            student={baseData.student}
+            cohorts={baseData.cohorts}
+            studentId={studentId}
+            courseId={baseData.courseId}
+          />
+        </div>
       }}
     </div>
   </div>

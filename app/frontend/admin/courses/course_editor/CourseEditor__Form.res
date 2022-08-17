@@ -22,7 +22,6 @@ type progressionBehavior = [#Limited | #Unlimited | #Strict]
 type state = {
   name: string,
   description: string,
-  endsAt: option<Js.Date.t>,
   hasNameError: bool,
   hasDescriptionError: bool,
   hasDateError: bool,
@@ -42,7 +41,6 @@ type state = {
 type action =
   | UpdateName(string, bool)
   | UpdateDescription(string, bool)
-  | UpdateEndsAt(option<Js.Date.t>)
   | StartSaving
   | FailSaving
   | UpdateAbout(string)
@@ -72,7 +70,6 @@ let reducer = (state, action) =>
       hasDescriptionError: hasDescriptionError,
       dirty: true,
     }
-  | UpdateEndsAt(date) => {...state, endsAt: date, dirty: true}
   | UpdatePublicSignup(publicSignup) => {...state, publicSignup: publicSignup, dirty: true}
   | UpdatePublicPreview(publicPreview) => {...state, publicPreview: publicPreview, dirty: true}
   | UpdateAbout(about) => {...state, about: about, dirty: true}
@@ -101,8 +98,8 @@ let reducer = (state, action) =>
 module CourseFragment = CourseEditor__Course.Fragment
 
 module CreateCourseQuery = %graphql(`
-    mutation CreateCourseMutation($name: String!, $description: String!, $endsAt: ISO8601DateTime, $about: String, $publicSignup: Boolean!, $publicPreview: Boolean!, $featured: Boolean!, $progressionBehavior: ProgressionBehavior!, $progressionLimit: Int, $highlights: [CourseHighlightInput!], $processingUrl: String) {
-      createCourse(name: $name, description: $description, endsAt: $endsAt, about: $about, publicSignup: $publicSignup, publicPreview: $publicPreview, featured: $featured, progressionBehavior: $progressionBehavior, progressionLimit: $progressionLimit, highlights: $highlights, processingUrl: $processingUrl) {
+    mutation CreateCourseMutation($name: String!, $description: String!, $about: String, $publicSignup: Boolean!, $publicPreview: Boolean!, $featured: Boolean!, $progressionBehavior: ProgressionBehavior!, $progressionLimit: Int, $highlights: [CourseHighlightInput!], $processingUrl: String) {
+      createCourse(name: $name, description: $description, about: $about, publicSignup: $publicSignup, publicPreview: $publicPreview, featured: $featured, progressionBehavior: $progressionBehavior, progressionLimit: $progressionLimit, highlights: $highlights, processingUrl: $processingUrl) {
         course {
           ...CourseFragment
         }
@@ -111,8 +108,8 @@ module CreateCourseQuery = %graphql(`
   `)
 
 module UpdateCourseQuery = %graphql(`
-    mutation UpdateCourseMutation($id: ID!, $name: String!, $description: String!, $endsAt: ISO8601DateTime, $about: String, $publicSignup: Boolean!, $publicPreview: Boolean!, $featured: Boolean!, $progressionBehavior: ProgressionBehavior!, $progressionLimit: Int, $highlights: [CourseHighlightInput!], $processingUrl: String) {
-      updateCourse(id: $id, name: $name, description: $description, endsAt: $endsAt, about: $about, publicSignup: $publicSignup, publicPreview: $publicPreview, featured: $featured, progressionBehavior: $progressionBehavior, progressionLimit: $progressionLimit, highlights: $highlights, processingUrl: $processingUrl) {
+    mutation UpdateCourseMutation($id: ID!, $name: String!, $description: String!, $about: String, $publicSignup: Boolean!, $publicPreview: Boolean!, $featured: Boolean!, $progressionBehavior: ProgressionBehavior!, $progressionLimit: Int, $highlights: [CourseHighlightInput!], $processingUrl: String) {
+      updateCourse(id: $id, name: $name, description: $description, about: $about, publicSignup: $publicSignup, publicPreview: $publicPreview, featured: $featured, progressionBehavior: $progressionBehavior, progressionLimit: $progressionLimit, highlights: $highlights, processingUrl: $processingUrl) {
         course {
           ...CourseFragment
         }
@@ -196,7 +193,6 @@ let createCourse = (state, send, reloadCoursesCB) => {
   let variables = CreateCourseQuery.makeVariables(
     ~name=state.name,
     ~description=state.description,
-    ~endsAt=?state.endsAt->Belt.Option.map(DateFns.encodeISO),
     ~about=?String.trim(state.about) === "" ? None : Some(state.about),
     ~publicSignup=state.publicSignup,
     ~publicPreview=state.publicPreview,
@@ -243,7 +239,6 @@ let updateCourse = (state, send, updateCourseCB, course) => {
     ~id=Course.id(course),
     ~name=state.name,
     ~description=state.description,
-    ~endsAt=?state.endsAt->Belt.Option.map(DateFns.encodeISO),
     ~about=?String.trim(state.about) === "" ? None : Some(state.about),
     ~publicSignup=state.publicSignup,
     ~publicPreview=state.publicPreview,
@@ -255,10 +250,10 @@ let updateCourse = (state, send, updateCourseCB, course) => {
     (),
   )
 
-  UpdateCourseQuery.make(variables)
-  |> Js.Promise.then_(result => {
-    switch result["updateCourse"]["course"] {
-    | Some(course) => updateCourseCB(Course.makeFromJs(course))
+  UpdateCourseQuery.fetch(variables)
+  |> Js.Promise.then_((result: UpdateCourseQuery.t) => {
+    switch result.updateCourse.course {
+    | Some(course) => updateCourseCB(Course.makeFromFragment(course))
     | None => send(FailSaving)
     }
 
@@ -441,7 +436,6 @@ let computeInitialState = course =>
   | Some(course) => {
       name: Course.name(course),
       description: Course.description(course),
-      endsAt: Course.endsAt(course),
       hasNameError: false,
       hasDateError: false,
       hasDescriptionError: false,
@@ -460,7 +454,6 @@ let computeInitialState = course =>
   | None => {
       name: "",
       description: "",
-      endsAt: None,
       hasNameError: false,
       hasDateError: false,
       hasDescriptionError: false,
@@ -532,18 +525,6 @@ let detailsTab = (state, send, course, updateCourseCB, reloadCoursesCB) => {
     <School__InputGroupError
       message={t("course_description.error_message")} active=state.hasDescriptionError
     />
-    <div className="mt-5">
-      <label className="tracking-wide text-xs font-semibold" htmlFor="course-ends-at-input">
-        {t("course_end_date.label")->str}
-      </label>
-      <span className="ml-1 text-xs"> {("(" ++ ts("optional") ++ ")")->str} </span>
-      <HelpIcon className="ml-2" link={t("course_end_date.help_url")}>
-        {t("course_end_date.help")->str}
-      </HelpIcon>
-      <DatePicker
-        onChange={date => send(UpdateEndsAt(date))} selected=?state.endsAt id="course-ends-at-input"
-      />
-    </div>
     <School__InputGroupError message={t("enter_date")} active=state.hasDateError />
     <div className="mt-5">
       <label className="tracking-wide text-xs font-semibold" htmlFor="course-about">
@@ -697,17 +678,13 @@ let make = (~course, ~updateCourseCB, ~reloadCoursesCB, ~selectedTab) => {
   let (state, send) = React.useReducerWithMapState(reducer, course, computeInitialState)
   <DisablingCover disabled={state.saving}>
     <div className="mx-auto bg-white">
-      <div className="pt-6 border-b border-gray-300 bg-gray-50">
+      <div className="border-b border-gray-300 bg-gray-50">
         <div className="max-w-2xl mx-auto">
-          <h5 className="uppercase text-center">
-            {(
-              course == None
-                ? t("button_text.add_new_course")
-                : t("button_text.edit_course_details")
-            )->str}
+          <h5 className="uppercase text-center p-6">
+            {(course == None ? t("title.add_new_course") : t("title.edit_course_details"))->str}
           </h5>
           {ReactUtils.nullUnless(
-            <div className="w-full pt-6">
+            <div className="w-full">
               <div
                 role="tablist"
                 className="flex flex-wrap w-full max-w-3xl mx-auto text-sm px-3 -mb-px">

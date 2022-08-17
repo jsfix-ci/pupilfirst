@@ -21,33 +21,31 @@ type settingsPages =
   | Admins
 
 type t =
-  | Overview
   | SchoolCoaches
   | Settings(settingsPages)
   | Courses
-  | SelectedCourse(courseId, coursePages)
+  | SelectedCourse(coursePages)
   | Communities
 
 let shrunk = t => {
   switch t {
-  | Overview
   | SchoolCoaches
   | Courses
   | Communities => false
   | Settings(_settingsPages) => true
-  | SelectedCourse(_courseId, _coursePages) => true
+  | SelectedCourse(_coursePages) => true
   }
 }
 
 let isSPA = t => {
   switch t {
-  | Overview
   | SchoolCoaches
   | Communities => false
   | Settings(_settingsPages) => false
-  | SelectedCourse(_courseId, coursePages) =>
+  | SelectedCourse(coursePages) =>
     switch coursePages {
     | Cohorts
+    | Calendars
     | Students
     | Teams => true
     | CourseCoaches
@@ -55,7 +53,6 @@ let isSPA = t => {
     | EvaluationCriteria
     | CourseExports
     | Authors
-    | Calendars
     | Certificates
     | Applicants => false
     }
@@ -68,9 +65,24 @@ let useSPA = (selectedPage, page) => {
   isSPA(selectedPage) && isSPA(page)
 }
 
-let path = t => {
+let coursePath = (coursePage, courseId) => {
+  switch coursePage {
+  | Students => `/school/courses/${courseId}/students`
+  | CourseCoaches => `/school/courses/${courseId}/coaches`
+  | Curriculum => `/school/courses/${courseId}/curriculum`
+  | EvaluationCriteria => `/school/courses/${courseId}/evaluation_criteria`
+  | CourseExports => `/school/courses/${courseId}/exports`
+  | Authors => `/school/courses/${courseId}/authors`
+  | Certificates => `/school/courses/${courseId}/certificates`
+  | Applicants => `/school/courses/${courseId}/applicants`
+  | Teams => `/school/courses/${courseId}/teams`
+  | Cohorts => `/school/courses/${courseId}/cohorts`
+  | Calendars => `/school/courses/${courseId}/calendars`
+  }
+}
+
+let path = (~courseId=?, t) => {
   switch t {
-  | Overview => "/school"
   | SchoolCoaches => "/school/coaches"
   | Settings(settingsPages) =>
     switch settingsPages {
@@ -78,27 +90,14 @@ let path = t => {
     | Admins => "/school/admins"
     }
   | Courses => "/school/courses"
-  | SelectedCourse(courseId, coursePages) =>
-    switch coursePages {
-    | Students => `/school/courses/${courseId}/students`
-    | CourseCoaches => `/school/courses/${courseId}/coaches`
-    | Curriculum => `/school/courses/${courseId}/curriculum`
-    | EvaluationCriteria => `/school/courses/${courseId}/evaluation_criteria`
-    | CourseExports => `/school/courses/${courseId}/exports`
-    | Authors => `/school/courses/${courseId}/authors`
-    | Certificates => `/school/courses/${courseId}/certificates`
-    | Applicants => `/school/courses/${courseId}/applicants`
-    | Teams => `/school/courses/${courseId}/teams`
-    | Cohorts => `/school/courses/${courseId}/cohorts`
-    | Calendars => `/school/courses/${courseId}/calendars`
-    }
+  | SelectedCourse(coursePage) =>
+    courseId->Belt.Option.mapWithDefault("#", id => coursePath(coursePage, id))
   | Communities => "/school/communities"
   }
 }
 
 let name = t => {
   switch t {
-  | Overview => "Overview"
   | SchoolCoaches => "Coaches"
   | Settings(settingsPages) =>
     switch settingsPages {
@@ -106,7 +105,7 @@ let name = t => {
     | Admins => "Admins"
     }
   | Courses => "Courses"
-  | SelectedCourse(_courseId, coursePages) =>
+  | SelectedCourse(coursePages) =>
     switch coursePages {
     | Students => "Students"
     | CourseCoaches => "Coaches"
@@ -117,8 +116,8 @@ let name = t => {
     | Certificates => "Certificates"
     | Applicants => "Applicants"
     | Teams => "Teams"
-    | Cohorts => "Cohorts"
     | Calendars => "Calendars"
+    | Cohorts => "Cohorts"
     }
   | Communities => "Communities"
   }
@@ -126,11 +125,10 @@ let name = t => {
 
 let icon = t => {
   switch t {
-  | Overview => "school"
   | SchoolCoaches => "users"
   | Settings(_settingsPages) => "cog"
   | Courses => "journal-text"
-  | SelectedCourse(_courseId, _coursePages) => "fas fa-book"
+  | SelectedCourse(_coursePages) => "fas fa-book"
   | Communities => "comment-alt"
   }
 }

@@ -67,7 +67,6 @@ type t = {
   id: string,
   name: string,
   description: string,
-  endsAt: option<Js.Date.t>,
   about: option<string>,
   publicSignup: bool,
   publicPreview: bool,
@@ -78,13 +77,14 @@ type t = {
   archivedAt: option<Js.Date.t>,
   highlights: array<Highlight.t>,
   processingUrl: option<string>,
+  coachesCount: int,
+  levelsCount: int,
+  cohortsCount: int,
 }
 
 let name = t => t.name
 
 let id = t => t.id
-
-let endsAt = t => t.endsAt
 
 let about = t => t.about
 
@@ -105,6 +105,12 @@ let archivedAt = t => t.archivedAt
 let highlights = t => t.highlights
 
 let processingUrl = t => t.processingUrl
+
+let levelsCount = t => t.levelsCount
+
+let cohortsCount = t => t.cohortsCount
+
+let coachesCount = t => t.coachesCount
 
 let progressionBehavior = t =>
   switch t.progressionBehavior {
@@ -149,82 +155,11 @@ let addImages = (~coverUrl, ~thumbnailUrl, ~coverFilename, ~thumbnailFilename, t
 
 let replaceImages = (cover, thumbnail, t) => {...t, cover: cover, thumbnail: thumbnail}
 
-let makeFromJs = rawCourse => {
-  let endsAt = Belt.Option.map(rawCourse["endsAt"], DateFns.decodeISO)
-  let archivedAt = Belt.Option.map(rawCourse["archivedAt"], DateFns.decodeISO)
-
-  let progressionBehavior = switch rawCourse["progressionBehavior"] {
-  | #Limited => Limited(rawCourse["progressionLimit"] |> Belt.Option.getExn)
-  | #Unlimited => Unlimited
-  | #Strict => Strict
-  }
-
-  {
-    id: rawCourse["id"],
-    name: rawCourse["name"],
-    description: rawCourse["description"],
-    endsAt: endsAt,
-    about: rawCourse["about"],
-    publicSignup: rawCourse["publicSignup"],
-    publicPreview: rawCourse["publicPreview"],
-    thumbnail: makeImageFromJs(rawCourse["thumbnail"]),
-    cover: makeImageFromJs(rawCourse["cover"]),
-    featured: rawCourse["featured"],
-    progressionBehavior: progressionBehavior,
-    archivedAt: archivedAt,
-    highlights: Js.Array.map(
-      c => Highlight.make(c["title"], c["description"], c["icon"]),
-      rawCourse["highlights"],
-    ),
-    processingUrl: rawCourse["processingUrl"],
-  }
-}
-
-let decode = json => {
-  let behavior = json |> {
-    open Json.Decode
-    field("progressionBehavior", string)
-  }
-
-  let progressionBehavior = switch behavior {
-  | "Limited" =>
-    let progressionLimit = json |> {
-      open Json.Decode
-      field("progressionLimit", int)
-    }
-    Limited(progressionLimit)
-  | "Unlimited" => Unlimited
-  | "Strict" => Strict
-  | otherValue =>
-    Rollbar.error("Unexpected progressionBehavior: " ++ otherValue)
-    raise(UnexpectedProgressionBehavior(behavior))
-  }
-
-  open Json.Decode
-  {
-    id: field("id", string, json),
-    name: field("name", string, json),
-    description: field("description", string, json),
-    endsAt: optional(field("endsAt", string), json)->Belt.Option.map(DateFns.parseISO),
-    progressionBehavior: progressionBehavior,
-    about: optional(field("about", string), json),
-    publicSignup: field("publicSignup", bool, json),
-    publicPreview: field("publicPreview", bool, json),
-    thumbnail: optional(field("thumbnail", Image.decode), json),
-    cover: optional(field("cover", Image.decode), json),
-    featured: field("featured", bool, json),
-    archivedAt: optional(field("archivedAt", string), json)->Belt.Option.map(DateFns.parseISO),
-    highlights: field("highlights", array(Highlight.decode), json),
-    processingUrl: field("processingUrl", optional(string), json),
-  }
-}
-
 module Fragment = %graphql(`
   fragment CourseFragment on Course {
     id
     name
     description
-    endsAt
     about
     publicSignup
     publicPreview
@@ -246,5 +181,43 @@ module Fragment = %graphql(`
       description
     }
     processingUrl
+    coachesCount
+    levelsCount
+    cohortsCount
   }
   `)
+
+let makeFromFragment = (course: Fragment.t) => {
+  let archivedAt = Belt.Option.map(course.archivedAt, DateFns.decodeISO)
+
+  let progressionBehavior = switch course.progressionBehavior {
+  | #Limited => Limited(course.progressionLimit |> Belt.Option.getExn)
+  | #Unlimited => Unlimited
+  | #Strict => Strict
+  | #FutureAddedValue(string) => {
+      Rollbar.error("Unexpected progression Behavior encountered: " ++ string)
+      raise(UnexpectedProgressionBehavior(string))
+    }
+  }
+
+  {
+    id: course.id,
+    name: course.name,
+    description: course.description,
+    about: course.about,
+    publicSignup: course.publicSignup,
+    publicPreview: course.publicPreview,
+    thumbnail: course.thumbnail->Belt.Option.map(image => Image.make(image.url, image.filename)),
+    cover: course.cover->Belt.Option.map(image => Image.make(image.url, image.filename)),
+    featured: course.featured,
+    progressionBehavior: progressionBehavior,
+    archivedAt: archivedAt,
+    highlights: course.highlights->Js.Array2.map(c =>
+      Highlight.make(c.title, c.description, c.icon)
+    ),
+    processingUrl: course.processingUrl,
+    coachesCount: course.coachesCount,
+    levelsCount: course.levelsCount,
+    cohortsCount: course.cohortsCount,
+  }
+}

@@ -48,7 +48,7 @@ module Types
 
     resolved_field :cohorts, Types::CohortType.connection_type, null: false do
       argument :course_id, ID, required: true
-      argument :search, String, required: false
+      argument :filter_string, String, required: false
     end
 
     resolved_field :content_blocks, [Types::ContentBlockType], null: false do
@@ -204,6 +204,10 @@ module Types
       argument :coach_ids, [ID], required: false
     end
 
+    resolved_field :coach, Types::CoachType, null: false do
+      argument :id, ID, required: true
+    end
+
     resolved_field :level, Types::LevelType, null: true do
       argument :course_id, ID, required: true
       argument :level_id, ID, required: false
@@ -219,6 +223,12 @@ module Types
                    null: false do
       argument :course_id, ID, required: true
       argument :resources, [Types::CourseResourceType], required: true
+    end
+
+    resolved_field :school_stats, Types::SchoolStatsType, null: false
+
+    resolved_field :applicant, Types::ApplicantType, null: false do
+      argument :applicant_id, ID, required: true
     end
   end
 end

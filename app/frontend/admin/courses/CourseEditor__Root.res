@@ -14,7 +14,7 @@ type status = [#Active | #Ended | #Archived]
 module CourseFragment = Course.Fragment
 
 module CoursesQuery = %graphql(`
-  query CoursesQuery($search: String, $after: String, $courseId: ID!, $status: CourseStatus, $skipCourseLoad: Boolean!) {
+  query CoursesQuery($search: String, $after: String, $courseId: ID!, $status: CourseStatus, $skipCourseLoad: Boolean!, $skipSchoolStatsLoad: Boolean!) {
     courses(status: $status, search: $search, first: 10, after: $after){
       nodes {
         ...CourseFragment
@@ -23,6 +23,10 @@ module CoursesQuery = %graphql(`
         endCursor,hasNextPage
       }
       totalCount
+    }
+    schoolStats @skip(if: $skipSchoolStatsLoad) {
+      studentsCount
+      coachesCount
     }
     course(id: $courseId) @skip(if: $skipCourseLoad) {
         ...CourseFragment
@@ -45,6 +49,10 @@ type editorAction =
   | Hidden
   | ShowForm(option<string>)
 
+type schoolStats =
+  | Unloaded
+  | Loaded({studentsCount: int, coachesCount: int})
+
 type state = {
   loading: LoadingV2.t,
   courses: Pagination.t,
@@ -53,6 +61,7 @@ type state = {
   totalEntriesCount: int,
   reloadCourses: bool,
   selectedCourse: option<Course.t>,
+  schoolStats: schoolStats,
 }
 
 type action =
@@ -67,14 +76,14 @@ type action =
   | SetFilterEnded
   | ClearArchivedFilter
   | UpdateCourse(Course.t)
-  | LoadCourses(option<string>, bool, array<Course.t>, int)
+  | LoadCourses(option<string>, bool, array<Course.t>, int, option<schoolStats>)
   | UpdateSelectedCourse(option<Course.t>)
 
 let reducer = (state, action) =>
   switch action {
   | UpdateSelectedCourse(selectedCourse) => {
       ...state,
-      selectedCourse,
+      selectedCourse: selectedCourse,
     }
   | SetSearchString(string) => {
       ...state,
@@ -131,8 +140,8 @@ let reducer = (state, action) =>
     }
   | BeginLoadingMore => {...state, loading: LoadingMore}
   | BeginReloading => {...state, loading: LoadingV2.setReloading(state.loading)}
-  | UpdateFilterString(filterString) => {...state, filterString}
-  | LoadCourses(endCursor, hasNextPage, newCourses, totalEntriesCount) =>
+  | UpdateFilterString(filterString) => {...state, filterString: filterString}
+  | LoadCourses(endCursor, hasNextPage, newCourses, totalEntriesCount, schoolSummary) =>
     let courses = switch state.loading {
     | LoadingMore => Js.Array.concat(newCourses, Pagination.toArray(state.courses))
     | Reloading(_) => newCourses
@@ -142,7 +151,8 @@ let reducer = (state, action) =>
       ...state,
       courses: Pagination.make(courses, hasNextPage, endCursor),
       loading: LoadingV2.setNotLoading(state.loading),
-      totalEntriesCount,
+      totalEntriesCount: totalEntriesCount,
+      schoolStats: Belt.Option.getWithDefault(schoolSummary, state.schoolStats),
     }
   | UpdateCourse(course) =>
     let newCourses = Pagination.update(state.courses, Course.updateList(course))
@@ -159,8 +169,7 @@ let courseLink = (href, title, icon) =>
     key=href
     href
     className="cursor-pointer block p-3 text-sm font-semibold text-gray-900 border-b border-gray-50 bg-white hover:text-primary-500 hover:bg-gray-50 focus:outline-none focus:text-primary-500 focus:bg-gray-50 whitespace-nowrap">
-    <i className=icon />
-    <span className="font-semibold ml-2"> {title->str} </span>
+    <i className=icon /> <span className="font-semibold ml-2"> {title->str} </span>
   </a>
 
 let courseLinks = course => {
@@ -190,22 +199,21 @@ let courseLinks = course => {
   ]
 }
 
-let loadCourses = (courseId, state, cursor, send) => {
+let loadCourses = (courseId, state, cursor, ~skipSchoolStatsLoad=true, send) => {
   let variables = CoursesQuery.makeVariables(
     ~status=?state.filter.status,
     ~after=?cursor,
     ~search=?state.filter.name,
     ~courseId=Belt.Option.getWithDefault(courseId, ""),
     ~skipCourseLoad=Belt.Option.isNone(courseId),
+    ~skipSchoolStatsLoad,
     (),
   )
-  CoursesQuery.make(variables)
-  |> Js.Promise.then_(response => {
-    let courses = Js.Array.map(
-      rawCourse => Course.makeFromJs(rawCourse),
-      response["courses"]["nodes"],
-    )
-    let course = response["course"]->Belt.Option.map(Course.makeFromJs)
+  CoursesQuery.fetch(variables)
+  |> Js.Promise.then_((response: CoursesQuery.t) => {
+    let courses =
+      response.courses.nodes->Js.Array2.map(rawCourse => Course.makeFromFragment(rawCourse))
+    let course = response.course->Belt.Option.map(Course.makeFromFragment)
     switch course {
     | None => send(UpdateSelectedCourse(None))
     | Some(course) =>
@@ -214,12 +222,18 @@ let loadCourses = (courseId, state, cursor, send) => {
       | Some(_) => send(UpdateSelectedCourse(None))
       }
     }
+
+    let schoolStats = Belt.Option.map(response.schoolStats, s => Loaded({
+      studentsCount: s.studentsCount,
+      coachesCount: s.coachesCount,
+    }))
     send(
       LoadCourses(
-        response["courses"]["pageInfo"]["endCursor"],
-        response["courses"]["pageInfo"]["hasNextPage"],
+        response.courses.pageInfo.endCursor,
+        response.courses.pageInfo.hasNextPage,
         courses,
-        response["courses"]["totalCount"],
+        response.courses.totalCount,
+        schoolStats,
       ),
     )
     Js.Promise.resolve()
@@ -345,7 +359,7 @@ let dropdownSelected =
 
 let showCourse = course => {
   <Spread key={Course.id(course)} props={"data-submission-id": Course.name(course)}>
-    <div className="w-full px-3 lg:px-5 md:w-1/2 mt-6 md:mt-10">
+    <div className="w-full">
       <div className="flex shadow bg-white rounded-lg flex-col justify-between h-full">
         <div>
           <div className="relative">
@@ -384,12 +398,43 @@ let showCourse = course => {
             </div>,
             Belt.Option.isSome(Course.archivedAt(course)),
           )}
-          <div
-            className="course-editor-course__description text-sm px-4 pt-2 w-full leading-relaxed">
-            {str(Course.description(course))}
+          <p className="text-sm px-4 py-2 text-gray-600"> {str(Course.description(course))} </p>
+        </div>
+        <div className="grid grid-cols-3 divide-x py-4 divide-gray-300 ">
+          <div className="flex-1 px-4">
+            <p className="text-sm text-gray-500 font-medium"> {ts("cohorts")->str} </p>
+            <p className="mt-1 text-lg font-semibold">
+              {Course.cohortsCount(course)->string_of_int->str}
+            </p>
+          </div>
+          <div className="flex-1 px-4">
+            <p className="text-sm text-gray-500 font-medium"> {ts("coaches")->str} </p>
+            <p className="mt-1 text-lg font-semibold">
+              {Course.coachesCount(course)->string_of_int->str}
+            </p>
+          </div>
+          <div className="flex-1 px-4">
+            <p className="pr-6 text-sm text-gray-500 font-medium"> {ts("levels")->str} </p>
+            <p className="mt-1 text-lg font-semibold">
+              {Course.levelsCount(course)->string_of_int->str}
+            </p>
           </div>
         </div>
-        <div className="grid grid-cols-5 gap-4 p-4">
+        {ReactUtils.nullIf(
+          <Dropdown
+            className="col-span-2" selected={dropdownSelected} contents={courseLinks(course)}
+          />,
+          Belt.Option.isSome(Course.archivedAt(course)),
+        )}
+        <div className="grid grid-cols-6 gap-4 p-4">
+          <button
+            title={ts("View Course")}
+            className="col-span-3 btn btn-primary px-4 py-2 bg-primary-50 rounded text-sm cursor-pointer">
+            <div>
+              <FaIcon classes="far fa-edit mr-3" />
+              <span className="font-semibold"> {str("View Course")} </span>
+            </div>
+          </button>
           <button
             title={ts("edit") ++ " " ++ Course.name(course)}
             className="col-span-3 btn btn-default px-4 py-2 bg-primary-50 text-primary-500 rounded text-sm cursor-pointer"
@@ -400,12 +445,6 @@ let showCourse = course => {
               <span className="font-semibold"> {str(t("edit_course_details"))} </span>
             </div>
           </button>
-          {ReactUtils.nullIf(
-            <Dropdown
-              className="col-span-2" selected={dropdownSelected} contents={courseLinks(course)}
-            />,
-            Belt.Option.isSome(Course.archivedAt(course)),
-          )}
         </div>
       </div>
     </div>
@@ -422,7 +461,42 @@ let showCourses = (courses, state) => {
             {t("empty_courses")->str}
           </h4>
         </div>
-      : <div className="flex flex-wrap">
+      : <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-8">
+          <div
+            className="bg-gray-100 border-2 border-gray-300 border-dashed rounded-lg p-4 text-center grid place-items-center">
+            <EmptyState
+              title={t("add_new_course")}
+              description={"Let's create another course."}
+              primaryAction={<button
+                className="btn btn-primary btn-lg"
+                onClick={_ => {
+                  RescriptReactRouter.push("/school/courses/new")
+                }}>
+                <PfIcon className="if i-plus-circle-regular if-fw" />
+                <span className="font-semibold ml-1"> {str(t("add_new_course"))} </span>
+              </button>}
+              image={<svg
+                width="150"
+                height="150"
+                viewBox="0 0 150 150"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg">
+                <circle cx="75" cy="75" r="75" fill="url(#paint0_linear_1452_24450)" />
+                <defs>
+                  <linearGradient
+                    id="paint0_linear_1452_24450"
+                    x1="17.246"
+                    y1="2.47079e-06"
+                    x2="179.679"
+                    y2="180.08"
+                    gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#D0D0D0" />
+                    <stop offset="1" stopColor="#D0D0D0" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+              </svg>}
+            />
+          </div>
           {Js.Array.map(course => showCourse(course), courses)->React.array}
         </div>}
     {entriesLoadedData(state.totalEntriesCount, Array.length(courses))}
@@ -451,7 +525,7 @@ let raiseUnsafeFindError = id => {
 }
 
 @react.component
-let make = () => {
+let make = (~school) => {
   let (state, send) = React.useReducer(
     reducer,
     {
@@ -465,6 +539,7 @@ let make = () => {
       },
       reloadCourses: false,
       selectedCourse: None,
+      schoolStats: Unloaded,
     },
   )
 
@@ -481,13 +556,16 @@ let make = () => {
 
   React.useEffect2(() => {
     switch url.path {
-    | list{"school", "courses", courseId, ..._} => loadCourses(Some(courseId), state, None, send)
+    | list{"school"} | list{"school", "courses", "new", ..._} =>
+      loadCourses(None, state, None, send, ~skipSchoolStatsLoad=false)
+    | list{"school", "courses", courseId, ..._} =>
+      loadCourses(Some(courseId), state, None, send, ~skipSchoolStatsLoad=false)
     | _ => loadCourses(None, state, None, send)
     }
     None
   }, (state.filter, state.reloadCourses))
 
-  <div className="flex flex-1 h-full bg-gray-50 overflow-y-scroll">
+  <div className="flex flex-1 h-full bg-gray-50">
     {switch (state.courses, editorAction) {
     | (Unloaded, _)
     | (_, Hidden) => React.null
@@ -518,16 +596,74 @@ let make = () => {
       }
     }}
     <div className="flex-1 flex flex-col">
-      <div className="items-center justify-between max-w-4xl mx-auto mt-8 w-full px-10">
-        <button
-          className="w-full flex items-center justify-center relative bg-white border-dashed text-primary-500 border-2 border-primary-300  hover:text-primary-600 hover:shadow-md hover:border-primary-300 focus:outline-none focus:bg-gray-50 focus:text-primary-600 focus:shadow-md focus:border-primary-300 p-6 rounded-lg cursor-pointer"
-          onClick={_ => RescriptReactRouter.push("/school/courses/new")}>
-          <i className="fas fa-plus-circle text-lg" />
-          <span className="font-semibold ml-2"> {str(t("add_new_course"))} </span>
-        </button>
+      <div className="w-full">
+        <div className="max-w-full mx-auto relative overflow-hidden">
+          <div className="bg-gradient-to-r from-secondary-500 to-secondary-600 bg-cover h-40">
+            {switch School.coverImageUrl(school) {
+            | Some(image) =>
+              <img
+                className="absolute h-full w-full object-cover"
+                src={image}
+                alt={School.name(school)}
+              />
+            | None =>
+              <div className="school-customize__cover-default h-full w-full svg-bg-pattern-6" />
+            }}
+          </div>
+          <div className="w-full bg-white p-6">
+            <div className="flex items-center max-w-4xl 2xl:max-w-5xl mx-auto justify-between">
+              <div className="flex gap-6 px-6">
+                <div
+                  className="school-overview__logo-container flex items-center bg-white p-3 border-4 border-white shadow-md ring-1 ring-gray-100 rounded-full -mt-16 overflow-hidden">
+                  {switch School.logoUrl(school) {
+                  | Some(url) =>
+                    <img
+                      className="h-9 md:h-12 object-contain flex text-sm items-center"
+                      src=url
+                      alt={"Logo of " ++ School.name(school)}
+                    />
+                  | None =>
+                    <div
+                      className="p-2 rounded-lg bg-white text-gray-900 hover:bg-gray-50 hover:text-primary-600">
+                      <span className="text-xl font-bold leading-tight">
+                        {School.name(school)->str}
+                      </span>
+                    </div>
+                  }}
+                </div>
+                <div className="school-overview__school-name">
+                  <p className="text-sm text-gray-500"> {ts("school")->str} </p>
+                  <h2 className="text-xl font-bold"> {School.name(school)->str} </h2>
+                </div>
+              </div>
+              {switch state.schoolStats {
+              | Unloaded => React.null
+              | Loaded(stats) =>
+                <div className="flex gap-6">
+                  <div className="border-r pr-6">
+                    <div>
+                      <p className="text-sm text-gray-500"> {ts("students")->str} </p>
+                      <p className="text-xl font-bold">
+                        {stats.studentsCount->string_of_int->str}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="">
+                    <div>
+                      <p className="text-sm text-gray-500"> {ts("coaches")->str} </p>
+                      <p className="text-xl font-bold">
+                        {stats.coachesCount->string_of_int->str}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              }}
+            </div>
+          </div>
+        </div>
       </div>
       <div className="max-w-4xl mx-auto w-full">
-        <div className="w-full sticky top-0 z-30 mt-4 px-10">
+        <div className="w-full sticky top-0 z-30 mt-4 px-6">
           <label
             htmlFor="search_courses"
             className="block text-tiny font-semibold uppercase pl-px text-left">

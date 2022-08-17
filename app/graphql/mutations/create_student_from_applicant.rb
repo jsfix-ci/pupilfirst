@@ -5,7 +5,6 @@ module Mutations
     argument :applicant_id, ID, required: true
     argument :title, String, required: false
     argument :affiliation, String, required: false
-    argument :access_ends_at, GraphQL::Types::ISO8601DateTime, required: false
     argument :tags, [String], required: true
     argument :notify_student, Boolean, required: false
 
@@ -34,10 +33,6 @@ module Mutations
             @params[:affiliation].presence || student.user.affiliation
         )
 
-        if @params[:access_ends_at].present?
-          student.update!(access_ends_at: @params[:access_ends_at])
-        end
-
         # rubocop:disable Lint/LiteralAsCondition
         if @params[:notify_student].presence || false
           StudentMailer.enrollment(student).deliver_later
@@ -52,6 +47,10 @@ module Mutations
 
     def applicant
       Applicant.find_by(id: @params[:applicant_id], email_verified: true)
+    end
+
+    def allow_token_auth?
+      true
     end
   end
 end

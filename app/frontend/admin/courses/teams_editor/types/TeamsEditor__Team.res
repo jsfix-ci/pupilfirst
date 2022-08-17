@@ -10,7 +10,12 @@ let name = t => t.name
 let students = t => t.students
 let cohort = t => t.cohort
 
-let make = (~id, ~name, ~students, ~cohort) => {id, name, students, cohort}
+let make = (~id, ~name, ~students, ~cohort) => {
+  id: id,
+  name: name,
+  students: students,
+  cohort: cohort,
+}
 
 module Fragment = %graphql(`
    fragment TeamFragment on Team {
@@ -30,6 +35,7 @@ module Fragment = %graphql(`
       name
       description
       endsAt
+      courseId
     }
   }
 
@@ -53,5 +59,6 @@ let makeFromFragment = (team: Fragment.t) =>
       ~name=team.cohort.name,
       ~description=team.cohort.description,
       ~endsAt=team.cohort.endsAt->Belt.Option.map(DateFns.decodeISO),
+      ~courseId=team.cohort.courseId,
     ),
   )

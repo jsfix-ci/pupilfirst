@@ -19,35 +19,6 @@ let showUserLink = (icon, href) => {
   </div>
 }
 
-let showUserLink = () => {
-  [showUserLink("power-off", "/users/sign_out")]
-}
-
-let showUser = user => {
-  <div className="mt-3">
-    <div className="p-3 flex w-full items-center bg-gray-50 rounded-md">
-      <div className="flex items-center justify-center rounded-full text-center flex-shrink-0">
-        {User.avatarUrl(user)->Belt.Option.mapWithDefault(
-          <Avatar
-            name={User.name(user)}
-            className="w-8 h-8 border border-gray-300 object-contain object-center rounded-full"
-          />,
-          src =>
-            <img
-              className="w-9 h-9 border border-gray-300 object-cover object-center rounded-full"
-              src
-              alt={User.name(user)}
-            />,
-        )}
-      </div>
-      <div className="pl-2 flex justify-between w-full items-center">
-        <p className="text-sm font-medium"> {str(User.name(user))} </p>
-        <div> {showUserLink()->React.array} </div>
-      </div>
-    </div>
-  </div>
-}
-
 let containerClasses = shrunk => {
   let defaultClasses = "bg-white school-admin-navbar__primary-nav border-r border-gray-200 flex flex-col justify-between py-3 "
 
@@ -66,22 +37,6 @@ let imageContainerClasses = shrunk => {
   defaultClasses ++ (shrunk ? "justify-center w-16 h-16" : "bg-white rounded")
 }
 
-let bottomLinkClasses = shrunk => {
-  let defaultClasses = "py-3 px-2 flex text-gray-800 rounded text-sm font-medium hover:text-primary-500 hover:bg-gray-50 "
-  defaultClasses ++ (shrunk ? "justify-center" : "items-center")
-}
-
-let bottomLink = (path, shrunk, iconClasses, text) => {
-  let title = shrunk ? Some(text) : None
-
-  <li>
-    <a ?title href=path className={bottomLinkClasses(shrunk)}>
-      <i className={iconClasses ++ " fa-fw text-lg"} />
-      {shrunk ? React.null : <span className="ml-2"> {text->str} </span>}
-    </a>
-  </li>
-}
-
 let topNavButtonContents = page => {
   [
     <PfIcon key="icon" className={"if i-" ++ Page.icon(page) ++ "-light if-fw text-lg"} />,
@@ -89,22 +44,29 @@ let topNavButtonContents = page => {
   ]->React.array
 }
 
-let showLink = (selectedPage, page, classes, title, contents) => {
-  Page.useSPA(selectedPage, page)
-    ? <Link href={Page.path(page)} className=classes ?title> {contents} </Link>
-    : <a href={Page.path(page)} className=classes ?title> {contents} </a>
+let showLink = (selectedPage, selectedCourse, page, classes, title, contents) => {
+  let courseId = selectedCourse->Belt.Option.map(Course.id)
+  let disabled = courseId->Belt.Option.isNone
+
+  Page.path(~courseId?, page) != "#"
+    ? Page.useSPA(selectedPage, page)
+        ? <Link disabled href={Page.path(~courseId?, page)} className=classes ?title>
+            {contents}
+          </Link>
+        : <a disabled href={Page.path(~courseId?, page)} className=classes ?title> {contents} </a>
+    : SkeletonLoading.singleLink()
 }
 
-let topLink = (selectedPage, page) => {
+let topLink = (selectedPage, selectedCourse, page) => {
   let defaultClasses = "school-admin-navbar__primary-nav-link py-3 px-2 mb-1"
   let classes =
     defaultClasses ++ (selectedPage == page ? " school-admin-navbar__primary-nav-link--active" : "")
   let title = Page.shrunk(selectedPage) ? Some(Page.name(page)) : None
 
-  showLink(selectedPage, page, classes, title, topNavButtonContents(page))
+  showLink(selectedPage, selectedCourse, page, classes, title, topNavButtonContents(page))
 }
 
-let secondaryNavOption = (selectedPage, page) => {
+let secondaryNavOption = (selectedPage, selectedCourse, page) => {
   let defaultClasses = "flex text-sm py-3 px-4 hover:bg-gray-50 hover:text-primary-500 focus:bg-gray-50 focus:text-primary-500 rounded items-center my-1"
   let classes =
     defaultClasses ++ (
@@ -114,11 +76,11 @@ let secondaryNavOption = (selectedPage, page) => {
     )
 
   <div key={Page.name(page)}>
-    {showLink(selectedPage, page, classes, None, Page.name(page)->str)}
+    {showLink(selectedPage, selectedCourse, page, classes, None, Page.name(page)->str)}
   </div>
 }
 
-let secondaryNavLinks = (selectedPage, courseId, currentUser) => {
+let secondaryNavLinks = (selectedPage, selectedCourse, currentUser) => {
   let navOptionsAdmin = [
     Page.Curriculum,
     Cohorts,
@@ -136,28 +98,29 @@ let secondaryNavLinks = (selectedPage, courseId, currentUser) => {
   let navOptionsAuthor = [Page.Curriculum, EvaluationCriteria]
 
   (User.isAuthor(currentUser) ? navOptionsAuthor : navOptionsAdmin)->Js.Array2.map(page =>
-    secondaryNavOption(selectedPage, SelectedCourse(courseId, page))
+    secondaryNavOption(selectedPage, selectedCourse, SelectedCourse(page))
   )
 }
 
-let secondaryNav = (courses, currentUser, selectedPage) =>
+let secondaryNav = (currentUser, selectedCourse, selectedPage) =>
   switch selectedPage {
   | Page.Settings(_settingsSelection) =>
     <div
       key="secondary-nav"
       className="bg-white school-admin-navbar__secondary-nav border-r border-gray-200 pb-6 overflow-y-auto">
-      <ul className="p-4">
-        {secondaryNavOption(selectedPage, Page.Settings(Customization))}
-        {secondaryNavOption(selectedPage, Page.Settings(Admins))}
-      </ul>
+      <div className="p-4">
+        {secondaryNavOption(selectedPage, selectedCourse, Page.Settings(Customization))}
+        {secondaryNavOption(selectedPage, selectedCourse, Page.Settings(Admins))}
+      </div>
     </div>
-  | SelectedCourse(courseId, _courseSelection) =>
+  | SelectedCourse(_courseSelection) =>
     <div
       key="secondary-nav"
       className="bg-white school-admin-navbar__secondary-nav border-r border-gray-200 pb-6 overflow-y-auto">
-      <div className="p-4">
-        <SchoolRouter__CoursesDropdown courses currentCourseId=courseId />
-        {secondaryNavLinks(selectedPage, courseId, currentUser)->React.array}
+      <div>
+        <div className="border-t px-4">
+          {secondaryNavLinks(selectedPage, selectedCourse, currentUser)->React.array}
+        </div>
       </div>
     </div>
   | _ => React.null
@@ -165,6 +128,7 @@ let secondaryNav = (courses, currentUser, selectedPage) =>
 
 @react.component
 let make = (~school, ~courses, ~selectedPage, ~currentUser) => {
+  let selectedCourse = React.useContext(SchoolRouter__CourseContext.context).selectedCourse
   [
     <div key="main-nav" className={containerClasses(Page.shrunk(selectedPage))}>
       <div>
@@ -199,8 +163,10 @@ let make = (~school, ~courses, ~selectedPage, ~currentUser) => {
         </div>
         {ReactUtils.nullIf(
           <ul>
-            {[Page.Courses, Overview, SchoolCoaches, Communities, Settings(Customization)]
-            ->Js.Array2.map(page => <li key={Page.name(page)}> {topLink(selectedPage, page)} </li>)
+            {[Page.Courses, SchoolCoaches, Communities, Settings(Customization)]
+            ->Js.Array2.map(page =>
+              <li key={Page.name(page)}> {topLink(selectedPage, selectedCourse, page)} </li>
+            )
             ->React.array}
             <li>
               {ReactUtils.nullIf(
@@ -209,17 +175,19 @@ let make = (~school, ~courses, ~selectedPage, ~currentUser) => {
                     className="px-2 pt-3 pb-1 text-xs font-semibold text-gray-400 border-t-2 border-gray-100">
                     {"Courses"->str}
                   </div>
-                  {Js.Array.map(course =>
-                    <li key={Course.id(course)}>
-                      <a
-                        ariaLabel={Course.name(course)}
-                        href={"/school/courses/" ++ Course.id(course) ++ "/curriculum"}
-                        className="text-gray-800 py-3 px-2 rounded font-medium text-xs flex items-center hover:bg-gray-50 hover:text-primary-500">
-                        <Avatar name={Course.name(course)} className="w-5 h-5 mr-2" />
-                        {str(Course.name(course))}
-                      </a>
-                    </li>
-                  , Js.Array.filter(course => !Course.ended(course), courses))->React.array}
+                  {Js.Array.map(
+                    course =>
+                      <li key={Course.id(course)}>
+                        <a
+                          ariaLabel={Course.name(course)}
+                          href={"/school/courses/" ++ Course.id(course) ++ "/curriculum"}
+                          className="text-gray-800 py-3 px-2 rounded font-medium text-xs flex items-center hover:bg-gray-50 hover:text-primary-500">
+                          <Avatar name={Course.name(course)} className="w-5 h-5 mr-2" />
+                          {str(Course.name(course))}
+                        </a>
+                      </li>,
+                    Js.Array.filter(course => !Course.ended(course), courses),
+                  )->React.array}
                 </ul>,
                 Page.shrunk(selectedPage),
               )}
@@ -228,30 +196,6 @@ let make = (~school, ~courses, ~selectedPage, ~currentUser) => {
           User.isAuthor(currentUser),
         )}
       </div>
-      <ul>
-        <div className="relative">
-          <Notifications__Root
-            wrapperClasses=""
-            iconClasses="school-admin-navbar__notifications-unread-bullet"
-            buttonClasses="w-full flex gap-2 relative text-gray-800 text-sm py-3 px-2 hover:text-primary-500 hover:bg-gray-50 font-medium items-center"
-            title=?{Page.shrunk(selectedPage) ? None : Some("Notifications")}
-            hasNotifications={User.hasNotifications(currentUser)}
-          />
-        </div>
-        {bottomLink("/dashboard", Page.shrunk(selectedPage), "fas fa-home", "Dashboard")}
-        <li>
-          {Page.shrunk(selectedPage)
-            ? <a
-                title=?{Page.shrunk(selectedPage) ? Some("Sign Out") : None}
-                className={bottomLinkClasses(Page.shrunk(selectedPage))}
-                rel="nofollow"
-                href="/users/sign_out">
-                <i className="fas fa-sign-out-alt fa-fw text-lg" />
-              </a>
-            : showUser(currentUser)}
-        </li>
-      </ul>
     </div>,
-    secondaryNav(courses, currentUser, selectedPage),
   ]->React.array
 }

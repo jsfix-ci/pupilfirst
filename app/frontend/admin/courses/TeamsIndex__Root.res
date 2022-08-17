@@ -30,7 +30,7 @@ let reducer = (state, action) =>
     {
       teams: PagedTeams.make(updatedTeams, hasNextPage, endCursor),
       loading: LoadingV2.setNotLoading(state.loading),
-      totalEntriesCount,
+      totalEntriesCount: totalEntriesCount,
     }
   | BeginLoadingMore => {...state, loading: LoadingMore}
   | BeginReloading => {...state, loading: LoadingV2.setReloading(state.loading)}
@@ -80,9 +80,7 @@ let makeFilters = () => {
 
 let studentCard = student =>
   <div className="flex gap-4 items-center p-4 rounded-lg bg-white border border-gray-200 ">
-    <div>
-      <Avatar name={UserProxy.name(student)} className="w-10 h-10 rounded-full" />
-    </div>
+    <div> <Avatar name={UserProxy.name(student)} className="w-10 h-10 rounded-full" /> </div>
     <div>
       <p className="text-sm font-semibold"> {UserProxy.name(student)->str} </p>
       <div className="text-xs"> {UserProxy.fullTitle(student)->str} </div>
@@ -103,15 +101,14 @@ let getTeams = (send, courseId, cursor, params) => {
           Team.make(
             ~id=t.id,
             ~name=t.name,
-            ~students=t.students->Js.Array2.map(
-              s =>
-                UserProxy.make(
-                  ~id=s.id,
-                  ~name=s.user.name,
-                  ~avatarUrl=s.user.avatarUrl,
-                  ~fullTitle=s.user.fullTitle,
-                  ~userId=s.user.id,
-                ),
+            ~students=t.students->Js.Array2.map(s =>
+              UserProxy.make(
+                ~id=s.id,
+                ~name=s.user.name,
+                ~avatarUrl=s.user.avatarUrl,
+                ~fullTitle=s.user.fullTitle,
+                ~userId=s.user.id,
+              )
             ),
             ~cohort=Cohort.makeFromFragment(t.cohort),
           )
@@ -135,42 +132,44 @@ let reloadTeams = (courseId, send, params) => {
   getTeams(send, courseId, None, params)
 }
 
-let showTeams = (state, courseId, teams) => {
+let showTeams = teams => {
   <div className="w-full">
-    {ArrayUtils.isEmpty(teams)
-      ? <div
-          className="flex flex-col mx-auto bg-white rounded-md border p-6 justify-center items-center">
-          <FaIcon classes="fas fa-comments text-5xl text-gray-400" />
-          <h4 className="mt-3 text-base md:text-lg text-center font-semibold">
-            {"Empty Teams message"->str}
-          </h4>
-        </div>
-      : teams
-        ->Js.Array2.map(team =>
-          <div className="p-6 bg-white rounded-lg" key={Team.id(team)}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <p className="text-lg font-semibold"> {Team.name(team)->str} </p>
-                <p className="px-3 py-2 text-xs bg-green-50 text-green-500 rounded-2xl ">
-                  {team->Team.cohort->Cohort.name->str}
-                </p>
-              </div>
-              <Link
-                href={`/school/courses/${courseId}/teams/${Team.id(team)}/details`}
-                className="block px-3 py-2 bg-grey-50 text-sm text-grey-600 border rounded border-gray-300 hover:bg-primary-100 hover:text-primary-500 hover:border-primary-500 focus:outline-none focus:bg-primary-100 focus:text-primary-500 focus:ring-2 focus:ring-focusColor-500">
-                <span className="inline-block pr-2">
-                  <i className="fas fa-edit" />
-                </span>
-                <span> {"Edit"->str} </span>
-              </Link>
-            </div>
-            <div className="grid grid-cols-1 gap-4 mt-6 lg md:grid-cols-2">
-              {Team.students(team)->Js.Array2.map(studentCard)->React.array}
-            </div>
+    {teams
+    ->Js.Array2.map(team =>
+      <div className="p-6 bg-white rounded-lg" key={Team.id(team)}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <p className="text-lg font-semibold"> {Team.name(team)->str} </p>
+            <p className="px-3 py-2 text-xs bg-green-50 text-green-500 rounded-2xl ">
+              {team->Team.cohort->Cohort.name->str}
+            </p>
           </div>
-        )
-        ->React.array}
-    {PagedTeams.showStats(state.totalEntriesCount, Array.length(teams), "Team")}
+          <Link
+            href={`/school/teams/${Team.id(team)}/details`}
+            className="block px-3 py-2 bg-grey-50 text-sm text-grey-600 border rounded border-gray-300 hover:bg-primary-100 hover:text-primary-500 hover:border-primary-500 focus:outline-none focus:bg-primary-100 focus:text-primary-500 focus:ring-2 focus:ring-focusColor-500">
+            <span className="inline-block pr-2"> <i className="fas fa-edit" /> </span>
+            <span> {"Edit"->str} </span>
+          </Link>
+        </div>
+        <div className="grid grid-cols-1 gap-4 mt-6 lg md:grid-cols-2">
+          {Team.students(team)->Js.Array2.map(studentCard)->React.array}
+        </div>
+      </div>
+    )
+    ->React.array}
+  </div>
+}
+
+let renderLoadMore = (send, courseId, params, cursor) => {
+  <div className="pb-6">
+    <button
+      className="btn btn-primary-ghost cursor-pointer w-full"
+      onClick={_ => {
+        send(BeginLoadingMore)
+        getTeams(send, courseId, Some(cursor), params)
+      }}>
+      {"Load More"->str}
+    </button>
   </div>
 }
 
@@ -184,9 +183,7 @@ let make = (~courseId, ~search) => {
   }, [search])
 
   <>
-    <Helmet>
-      <title> {str("Teams Index")} </title>
-    </Helmet>
+    <Helmet> <title> {str("Teams Index")} </title> </Helmet>
     <div>
       <div>
         <div className="max-w-4xl 2xl:max-w-5xl mx-auto px-4 mt-8">
@@ -206,41 +203,29 @@ let make = (~courseId, ~search) => {
             <div className="border rounded-lg mx-auto bg-white ">
               <div>
                 <div className="flex w-full items-start p-4">
-                  <CourseResourcesFilter courseId filters={makeFilters()} search={search} />
+                  <CourseResourcesFilter
+                    courseId
+                    filters={makeFilters()}
+                    search={search}
+                    sorter={CourseResourcesFilter.makeSorter(
+                      "sort_by",
+                      ["Name", "First Created", "Last Created"],
+                      "Name",
+                    )}
+                  />
                 </div>
               </div>
             </div>
           </div>
-          <div>
-            {switch state.teams {
-            | Unloaded =>
-              <div> {SkeletonLoading.multiple(~count=6, ~element=SkeletonLoading.card())} </div>
-            | PartiallyLoaded(teams, cursor) =>
-              <div>
-                {showTeams(state, courseId, teams)}
-                {switch state.loading {
-                | LoadingMore =>
-                  <div> {SkeletonLoading.multiple(~count=1, ~element=SkeletonLoading.card())} </div>
-                | Reloading(times) =>
-                  ReactUtils.nullUnless(
-                    <div className="pb-6">
-                      <button
-                        className="btn btn-primary-ghost cursor-pointer w-full"
-                        onClick={_ => {
-                          send(BeginLoadingMore)
-                          getTeams(send, courseId, Some(cursor), params)
-                        }}>
-                        {"Load More"->str}
-                      </button>
-                    </div>,
-                    ArrayUtils.isEmpty(times),
-                  )
-                }}
-              </div>
-            | FullyLoaded(teams) => <div> {showTeams(state, courseId, teams)} </div>
-            }}
-            {PagedTeams.showLoading(state.teams, state.loading)}
-          </div>
+          {PagedTeams.renderView(
+            ~pagedItems=state.teams,
+            ~loading=state.loading,
+            ~entriesView=showTeams,
+            ~totalEntriesCount=state.totalEntriesCount,
+            ~loadMore=renderLoadMore(send, courseId, params),
+            ~resourceName="Teams",
+            ~emptyMessage="No Teams Found",
+          )}
         </div>
       </div>
     </div>

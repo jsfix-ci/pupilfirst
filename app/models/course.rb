@@ -42,7 +42,12 @@ class Course < ApplicationRecord
   scope :live, -> { where(archived_at: nil) }
   scope :archived, -> { where.not(archived_at: nil) }
   scope :access_active,
-        -> { where('ends_at > ?', Time.now).or(where(ends_at: nil)) }
+        -> {
+          joins(:cohorts)
+            .where('cohorts.ends_at > ? OR cohorts.ends_at IS NULL', Time.now)
+            .distinct
+        }
+  scope :ended, -> { live.where.not(id: access_active) }
   scope :active, -> { live.access_active }
 
   normalize_attribute :about, :processing_url
@@ -73,7 +78,7 @@ class Course < ApplicationRecord
   end
 
   def ended?
-    ends_at.present? && ends_at.past?
+    !cohorts.active.exists?
   end
 
   def cover_url

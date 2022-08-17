@@ -54,7 +54,7 @@ Rails.application.routes.draw do
 
   resources :notifications, only: %i[show]
 
-  resource :school, only: %i[show update] do
+  resource :school, only: [] do
     get 'customize'
     get 'admins'
     post 'images'
@@ -62,6 +62,7 @@ Rails.application.routes.draw do
 
   namespace :school, module: 'schools' do
     [
+      '/',
       'courses',
       'courses/new',
       'courses/:course_id',
@@ -70,17 +71,17 @@ Rails.application.routes.draw do
       'courses/:course_id/actions',
       'courses/:course_id/cohorts',
       'courses/:course_id/cohorts/new',
-      'courses/:course_id/cohorts/:cohort_id/details',
-      'courses/:course_id/cohorts/:cohort_id/actions',
+      'cohorts/:cohort_id/details',
+      'cohorts/:cohort_id/actions',
       'courses/:course_id/students',
       'courses/:course_id/students/new',
       'courses/:course_id/students/import',
-      'courses/:course_id/students/:student_id/details',
-      'courses/:course_id/students/:student_id/actions',
+      'students/:student_id/details',
+      'students/:student_id/actions',
       'courses/:course_id/teams',
       'courses/:course_id/teams/new',
-      'courses/:course_id/teams/:team_id/details',
-      'courses/:course_id/teams/:team_id/actions',
+      'teams/:team_id/details',
+      'teams/:team_id/actions',
       'courses/:course_id/calendars',
       'courses/:course_id/calendars/new'
     ].each do |path|

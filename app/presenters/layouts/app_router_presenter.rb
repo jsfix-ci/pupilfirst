@@ -22,6 +22,7 @@ module Layouts
         name: school_name,
         logo_url: logo_url,
         icon_url: icon_url,
+        cover_image_url: cover_image_url,
         links: nav_links
       }
     end
@@ -123,30 +124,29 @@ module Layouts
     end
 
     def course_details_array
-      courses
-        .includes([:thumbnail_attachment])
-        .map do |course|
-          {
-            id: course.id,
-            name: course.name,
-            can_review: course.id.in?(courses_with_review_access_ids),
-            is_author: course.id.in?(courses_with_author_access_ids),
-            enable_leaderboard: course.enable_leaderboard?,
-            description: course.description,
-            exited: student_dropped_out(course.id),
-            thumbnail_url: course.thumbnail_url,
-            linked_communities: linked_communities(course),
-            access_ended: student_access_end(course.id),
-            ended: course.ended?,
-            is_student: student_profile?(course.id)
-          }
-        end
+      courses.map do |course|
+        {
+          id: course.id,
+          name: course.name,
+          can_review: course.id.in?(courses_with_review_access_ids),
+          is_author: course.id.in?(courses_with_author_access_ids),
+          enable_leaderboard: course.enable_leaderboard?,
+          description: course.description,
+          exited: student_dropped_out(course.id),
+          thumbnail_url: course.thumbnail_url,
+          linked_communities: linked_communities(course),
+          access_ended: student_access_end(course.id),
+          ended: course.ended?,
+          is_student: student_profile?(course.id)
+        }
+      end
     end
 
     def student_profile?(course_id)
       courses_with_student_profile.detect { |c| c.id == course_id }.present?
     end
 
+    # Todo: Bodhi, This needs to change
     def student_access_end(course_id)
       course_with_student =
         courses_with_student_profile.detect { |c| c.id == course_id }
@@ -183,7 +183,7 @@ module Layouts
           custom_links =
             SchoolLink
               .where(school: current_school, kind: SchoolLink::KIND_HEADER)
-              .order(created_at: :DESC)
+              .order(:sort_index)
               .map do |school_link|
                 { title: school_link.title, url: school_link.url }
               end
@@ -252,6 +252,12 @@ module Layouts
     def logo_url
       if current_school.logo_on_light_bg.attached?
         view.rails_public_blob_url(current_school.logo_variant(:high))
+      end
+    end
+
+    def cover_image_url
+      if current_school.cover_image.attached?
+        view.rails_public_blob_url(current_school.cover_image)
       end
     end
 

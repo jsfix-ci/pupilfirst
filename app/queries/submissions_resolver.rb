@@ -73,8 +73,8 @@ class SubmissionsResolver < ApplicationQuery
     stage_4 =
       if course.faculty.exists?(id: personal_coach_id)
         stage_3
-          .joins(founders: :faculty_student_enrollments)
-          .where(faculty_student_enrollments: { faculty_id: personal_coach_id })
+          .joins(founders: :faculty_founder_enrollments)
+          .where(faculty_founder_enrollments: { faculty_id: personal_coach_id })
       else
         stage_3
       end
@@ -124,7 +124,7 @@ class SubmissionsResolver < ApplicationQuery
         scope = include_inactive ? course.founders : course.founders.active
 
         if search.present?
-          students_with_users = scope.joins(founders: :user)
+          students_with_users = scope.joins(:user)
 
           students_with_users
             .where('users.name ILIKE ?', "%#{search}%")

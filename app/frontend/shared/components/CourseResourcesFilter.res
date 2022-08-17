@@ -7,6 +7,12 @@ type filterType =
   | Search
   | Custom(string)
 
+type sorter = {
+  key: string,
+  options: array<string>,
+  default: string,
+}
+
 type filter = {
   key: string,
   label: string,
@@ -15,7 +21,11 @@ type filter = {
 }
 
 let makeFilter = (key, label, filterType: filterType, color) => {
-  {key, label, filterType, color}
+  {key: key, label: label, filterType: filterType, color: color}
+}
+
+let makeSorter = (key, options, default) => {
+  {key: key, options: options, default: default}
 }
 
 type filterItem = {
@@ -41,9 +51,9 @@ let reducer = (state, action) =>
       ...state,
       filterInput: "",
     }
-  | UpdateFilterInput(filterInput) => {...state, filterInput}
+  | UpdateFilterInput(filterInput) => {...state, filterInput: filterInput}
   | SetLoading => {...state, filterLoading: true}
-  | SetFilterData(filterData) => {...state, filterData, filterLoading: false}
+  | SetFilterData(filterData) => {...state, filterData: filterData, filterLoading: false}
   }
 
 module CourseResourceInfoInfoQuery = %graphql(`
@@ -109,11 +119,11 @@ module Selectable = {
   let searchString = t => Belt.Option.getWithDefault(t.label, t.key) ++ " " ++ t.displayValue
 
   let make = (key, value, label, color) => {
-    key,
+    key: key,
     orginalValue: value,
     displayValue: value->formatStringWithID,
-    label,
-    color,
+    label: label,
+    color: color,
   }
 }
 
@@ -161,13 +171,13 @@ let selectedFromQueryParams = (params, filters) => {
   ->ArrayUtils.flattenV2
 }
 
-let onSelect = (params, send, selectable) => {
-  Webapi.Url.URLSearchParams.set(
-    Selectable.key(selectable),
-    Selectable.orginalValue(selectable),
-    params,
-  )
+let setParams = (key, value, params) => {
+  Webapi.Url.URLSearchParams.set(key, value, params)
   RescriptReactRouter.push("?" ++ Webapi.Url.URLSearchParams.toString(params))
+}
+
+let onSelect = (params, send, selectable) => {
+  setParams(Selectable.key(selectable), Selectable.orginalValue(selectable), params)
   send(UnsetSearchString)
 }
 
@@ -176,8 +186,37 @@ let onDeselect = (params, selectable) => {
   RescriptReactRouter.push("?" ++ Webapi.Url.URLSearchParams.toString(params))
 }
 
+let selected = (sorter: sorter, params) => {
+  let value =
+    Webapi.Url.URLSearchParams.get(sorter.key, params)->Belt.Option.getWithDefault(sorter.default)
+  <button
+    className="p-3 w-28 text-left truncate cursor-pointer bg-white border border-gray-300 text-gray-900 rounded-md hover:bg-primary-100 hover:text-primary-400 hover:border-primary-400 focus:outline-none focus:bg-primary-100 focus:text-primary-400 focus:border-primary-400">
+    {value->str}
+  </button>
+}
+
+let contents = (sorter, params) => {
+  sorter.options->Js.Array2.map(sort =>
+    <button
+      key=sort
+      title={"select" ++ " " ++ sort}
+      className="w-full cursor-pointer block p-3 text-xs font-semibold text-gray-900 border-b border-gray-50 bg-white hover:text-primary-500 hover:bg-gray-50 focus:outline-none focus:text-primary-500 focus:bg-gray-50"
+      onClick={_e => setParams(sorter.key, sort, params)}>
+      {sort->str}
+    </button>
+  )
+}
+
 @react.component
-let make = (~courseId, ~filters: array<filter>, ~search) => {
+let make = (
+  ~id="course-resource-filter",
+  ~courseId,
+  ~filters: array<filter>,
+  ~search,
+  ~placeholder="Filter Resources",
+  ~sorter=?,
+  ~hint="...or start typing to filter by student using their name or email address",
+) => {
   let (state, send) = React.useReducer(reducer, computeInitialState())
   let params = Webapi.Url.URLSearchParams.make(search)
 
@@ -186,17 +225,32 @@ let make = (~courseId, ~filters: array<filter>, ~search) => {
     None
   }, [courseId])
 
-  <Multiselect
-    id="filter"
-    unselected={unselected(state, filters)}
-    selected={selectedFromQueryParams(params, filters)}
-    onSelect={onSelect(params, send)}
-    onDeselect={onDeselect(params)}
-    value=state.filterInput
-    onChange={filterInput => send(UpdateFilterInput(filterInput))}
-    placeholder={"Filter Resources"}
-    loading={state.filterLoading}
-    defaultOptions={unselected(state, filters)}
-    hint={"...or start typing to filter by student using their name or email address"}
-  />
+  <div className="w-full flex gap-3">
+    <div className="flex-1">
+      <p className="text-xs uppercase font-medium pb-2"> {"Filter"->str} </p>
+      <Multiselect
+        id
+        unselected={unselected(state, filters)}
+        selected={selectedFromQueryParams(params, filters)}
+        onSelect={onSelect(params, send)}
+        onDeselect={onDeselect(params)}
+        value=state.filterInput
+        onChange={filterInput => send(UpdateFilterInput(filterInput))}
+        placeholder
+        loading={state.filterLoading}
+        defaultOptions={unselected(state, filters)}
+        hint
+      />
+    </div>
+    {switch sorter {
+    | Some(sorter) =>
+      <div>
+        <p className="text-xs uppercase font-medium pb-2"> {"Sort by"->str} </p>
+        <Dropdown2
+          selected={selected(sorter, params)} contents={contents(sorter, params)} right=true
+        />
+      </div>
+    | None => React.null
+    }}
+  </div>
 }

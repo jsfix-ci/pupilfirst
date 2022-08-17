@@ -32,11 +32,15 @@ let reducer = (state, action) =>
       ...state,
       students: PagedStudents.make(updatedStudent, hasNextPage, endCursor),
       loading: LoadingV2.setNotLoading(state.loading),
-      totalEntriesCount,
+      totalEntriesCount: totalEntriesCount,
     }
   | BeginLoadingMore => {...state, loading: LoadingMore}
   | BeginReloading => {...state, loading: LoadingV2.setReloading(state.loading)}
   }
+
+module LevelFragment = Shared__Level.Fragment
+module CohortFragment = Cohort.Fragment
+module AdminUserFragment = Admin__User.Fragment
 
 module CourseStudentsQuery = %graphql(`
     query CourseStudentsQuery($courseId: ID!, $after: String, $filterString: String) {
@@ -45,24 +49,13 @@ module CourseStudentsQuery = %graphql(`
           id
           taggings
           user {
-            id
-            name
-            email
-            avatarUrl
-            title
-            affiliation
-            taggings
+            ...AdminUserFragment
           }
           level {
-            id
-            name
-            number
+            ...LevelFragment
           }
           cohort {
-            id
-            name
-            description
-            endsAt
+            ...CohortFragment
           }
         }
         pageInfo {
@@ -83,14 +76,22 @@ let getStudents = (send, courseId, cursor, params) => {
     ~filterString=?Some(filterString),
     (),
   )
-  |> CourseStudentsQuery.make
-  |> Js.Promise.then_(response => {
+  |> CourseStudentsQuery.fetch
+  |> Js.Promise.then_((response: CourseStudentsQuery.t) => {
     send(
       LoadStudents(
-        response["courseStudents"]["pageInfo"]["endCursor"],
-        response["courseStudents"]["pageInfo"]["hasNextPage"],
-        Js.Array.map(StudentInfo.makeFromJS, response["courseStudents"]["nodes"]),
-        response["courseStudents"]["totalCount"],
+        response.courseStudents.pageInfo.endCursor,
+        response.courseStudents.pageInfo.hasNextPage,
+        response.courseStudents.nodes->Js.Array2.map(studentDetails =>
+          StudentInfo.make(
+            ~id=studentDetails.id,
+            ~taggings=studentDetails.taggings,
+            ~user=Admin__User.makeFromFragment(studentDetails.user),
+            ~level=Shared__Level.makeFromFragment(studentDetails.level),
+            ~cohort=Cohort.makeFromFragment(studentDetails.cohort),
+          )
+        ),
+        response.courseStudents.totalCount,
       ),
     )
     Js.Promise.resolve()
@@ -136,13 +137,14 @@ let showTag = (~value=?, key, text, color, params) => {
   </button>
 }
 
-let studentsList = (students, courseId, params) => {
+let studentsList = (params, students) => {
   <div className="space-y-4">
     {students
     ->Js.Array2.map(student => {
       <div key={StudentInfo.id(student)} className="h-full flex items-center bg-white">
-        <div className="flex flex-1 items-center text-left justify-between rounded-md shadow">
-          <div className="flex py-4 px-4">
+        <div
+          className="py-4 px-4 flex gap-4 flex-1 items-center text-left justify-between rounded-md shadow">
+          <div className="flex">
             <div className="text-sm flex items-center space-x-4">
               <img
                 className="inline-block h-12 w-12 rounded-full"
@@ -151,7 +153,7 @@ let studentsList = (students, courseId, params) => {
               />
               <div>
                 <Link
-                  href={`/school/courses/${courseId}/students/${StudentInfo.id(student)}/edit`}
+                  href={`/school/students/${StudentInfo.id(student)}/details`}
                   className="font-semibold inline-block hover:underline hover:text-primary-500 transition ">
                   {User.name(StudentInfo.user(student))->str}
                 </Link>
@@ -188,8 +190,9 @@ let studentsList = (students, courseId, params) => {
           </div>
           <div>
             <Link
-              href={`/school/courses/${courseId}/students/${StudentInfo.id(student)}/details`}
-              className="flex flex-1 items-center text-left py-4 px-4 hover:bg-gray-100 hover:text-primary-500 focus:bg-gray-100 focus:text-primary-500 justify-between">
+              ariaLabel={`Edit ${User.name(StudentInfo.user(student))}'s profile`}
+              href={`/school/students/${StudentInfo.id(student)}/details`}
+              className="flex flex-1 items-center rounded-md hover:bg-primary-50 hover:text-primary-500 focus:bg-primary-50 focus:text-primary-500 justify-between">
               <span className="inline-flex items-center p-2">
                 <PfIcon className="if i-edit-regular if-fw" />
                 <span className="ml-2"> {"Edit"->str} </span>
@@ -217,12 +220,25 @@ let makeFilters = () => {
       "student_tags",
       "Student Tags",
       DataLoad(#StudentTag),
-      "indigo",
+      "focusColor",
     ),
     CourseResourcesFilter.makeFilter("user_tags", "User Tags", DataLoad(#UserTag), "blue"),
     CourseResourcesFilter.makeFilter("email", "Search by Email", Search, "gray"),
     CourseResourcesFilter.makeFilter("name", "Search by Name", Search, "gray"),
   ]
+}
+
+let renderLoadMore = (send, courseId, params, cursor) => {
+  <div className="pb-6">
+    <button
+      className="btn btn-primary-ghost cursor-pointer w-full"
+      onClick={_ => {
+        send(BeginLoadingMore)
+        getStudents(send, courseId, Some(cursor), params)
+      }}>
+      {"Load More"->str}
+    </button>
+  </div>
 }
 
 @react.component
@@ -235,9 +251,7 @@ let make = (~courseId, ~search) => {
   }, [search])
 
   <>
-    <Helmet>
-      <title> {str("Students Index")} </title>
-    </Helmet>
+    <Helmet> <title> {str("Students Index")} </title> </Helmet>
     <div>
       <div>
         <div className="max-w-4xl 2xl:max-w-5xl mx-auto px-4 mt-8">
@@ -260,42 +274,29 @@ let make = (~courseId, ~search) => {
             <div className="border rounded-lg mx-auto bg-white ">
               <div>
                 <div className="flex w-full items-start p-4">
-                  <CourseResourcesFilter courseId filters={makeFilters()} search={search} />
-                  {"sorter"->str}
+                  <CourseResourcesFilter
+                    courseId
+                    filters={makeFilters()}
+                    search={search}
+                    sorter={CourseResourcesFilter.makeSorter(
+                      "sort_by",
+                      ["Name", "First Created", "Last Created"],
+                      "Name",
+                    )}
+                  />
                 </div>
               </div>
             </div>
           </div>
-          <div>
-            {switch state.students {
-            | Unloaded =>
-              <div> {SkeletonLoading.multiple(~count=6, ~element=SkeletonLoading.card())} </div>
-            | PartiallyLoaded(students, cursor) =>
-              <div>
-                {studentsList(students, courseId, params)}
-                {switch state.loading {
-                | LoadingMore =>
-                  <div> {SkeletonLoading.multiple(~count=1, ~element=SkeletonLoading.card())} </div>
-                | Reloading(times) =>
-                  ReactUtils.nullUnless(
-                    <div className="pb-6">
-                      <button
-                        className="btn btn-primary-ghost cursor-pointer w-full"
-                        onClick={_ => {
-                          send(BeginLoadingMore)
-                          getStudents(send, courseId, Some(cursor), params)
-                        }}>
-                        {"Load More"->str}
-                      </button>
-                    </div>,
-                    ArrayUtils.isEmpty(times),
-                  )
-                }}
-              </div>
-            | FullyLoaded(students) => <div> {studentsList(students, courseId, params)} </div>
-            }}
-          </div>
-          {PagedStudents.showLoading(state.students, state.loading)}
+          {PagedStudents.renderView(
+            ~pagedItems=state.students,
+            ~loading=state.loading,
+            ~entriesView=studentsList(params),
+            ~totalEntriesCount=state.totalEntriesCount,
+            ~loadMore=renderLoadMore(send, courseId, params),
+            ~resourceName="Students",
+            ~emptyMessage="No Students Found",
+          )}
         </div>
       </div>
     </div>
